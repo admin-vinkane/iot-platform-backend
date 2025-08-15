@@ -15,19 +15,35 @@ This project provides backend Lambda functions for IoT device and region managem
 ## Setup
 1. Clone the repo and install dependencies for each Lambda:
   ```sh
+
+- Use AWS Secrets Manager or SSM Parameter Store for secrets, not plain environment variables.
+- All Lambda code uses structured logging and robust error handling.
+- IAM policies follow least privilege principle.
   pip install -r lambdas/v_devices/requirements.txt
   pip install -r lambdas/v_regions/requirements.txt
-  ```
+- Automated CI runs linting (`flake8`), formatting (`black`), type checking (`mypy`), and tests (`pytest`).
+- Add new dependencies to `requirements.txt` and `requirements-dev.txt`.
+- Use `requirements-dev.txt` for development dependencies.
+- All code should be formatted with `black` and pass `flake8` and `mypy`.
+- Add/expand tests in `tests/` for new features or bugfixes.
 2. Configure AWS CLI and credentials.
+## API Documentation
+- Document all API endpoints and payloads in an OpenAPI/Swagger spec (recommended: `openapi.yaml`).
+- Add example event payloads and error responses for each Lambda in the docs.
 
-
+## Integration Testing
+- Add integration tests in `tests/` using DynamoDB Local or mocks for database calls.
 
 ## Deployment
+- Use the provided scripts for packaging and uploading Lambda code.
+- For production, use a CI/CD pipeline to automate build, test, and deploy steps.
 
-### 1. Build Lambda Zip Files Only (No Upload)
+## Monitoring
+- Ensure CloudWatch metrics and alarms are set for Lambda errors and throttles.
+## Deployment
+
 To create zip files for each Lambda (for local use or manual upload):
 ```sh
-chmod +x scripts/build_zip_only.sh
 ./scripts/build_zip_only.sh
 ```
 This will create `dist/v_devices.zip` and `dist/v_regions.zip`.

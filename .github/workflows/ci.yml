@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install flake8 black mypy pytest
+          pip install -r lambdas/v_devices/requirements.txt
+          pip install -r lambdas/v_regions/requirements.txt
+      - name: Lint with flake8
+        run: |
+          flake8 lambdas/ shared/ tests/
+      - name: Check formatting with black
+        run: |
+          black --check lambdas/ shared/ tests/
+      - name: Type check with mypy
+        run: |
+          mypy lambdas/ shared/
+      - name: Run tests
+        run: |
+          pytest --maxfail=1 --disable-warnings --tb=short
