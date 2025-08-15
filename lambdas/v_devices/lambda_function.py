@@ -6,6 +6,23 @@ import boto3
 import logging
 from shared.response_utils import SuccessResponse, ErrorResponse
 
+# Add pydantic for schema validation
+from pydantic import BaseModel, ValidationError, Field
+
+# Device details schema
+class DeviceDetails(BaseModel):
+    PK: str = Field(..., description="Device ID, must start with 'device-'")
+    SK: str = Field(..., description="Device type or sub-ID")
+    name: str
+    created_date: str = None
+    updated_date: str = None
+    status: str = None
+    metadata: dict = None
+
+    @classmethod
+    def validate_pk(cls, pk: str) -> bool:
+        return pk.startswith("device-")
+
 TABLE = os.environ.get("TABLE_NAME", "v_devices")
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE)
@@ -31,16 +48,23 @@ def lambda_handler(event, context):
     try:
         if method == "POST":
             body = json.loads(event.get("body", "{}"))
-            if not validate_pk_sk(body):
-                logger.warning("Missing or invalid PK/SK in POST body")
-                return ErrorResponse.build("Missing or invalid PK or SK in body", 400)
-            body.setdefault("created_date", context.aws_request_id if context else "")
+            # Validate schema
             try:
-                table.put_item(Item=body)
+                device = DeviceDetails(**body)
+                if not DeviceDetails.validate_pk(device.PK):
+                    logger.warning("PK does not start with 'device-'")
+                    return ErrorResponse.build("PK must start with 'device-'", 400)
+            except ValidationError as ve:
+                logger.warning(f"Schema validation failed: {ve}")
+                return ErrorResponse.build(f"Invalid device details: {ve}", 400)
+            item = device.dict(exclude_none=True)
+            item.setdefault("created_date", context.aws_request_id if context else "")
+            try:
+                table.put_item(Item=item)
             except Exception as e:
                 logger.error(f"DynamoDB put_item failed: {e}")
                 return ErrorResponse.build("Database error", 500)
-            return SuccessResponse.build({"message": "created", "item": body})
+            return SuccessResponse.build({"message": "created", "item": item})
 
         if method == "GET":
             params = event.get("queryStringParameters") or event.get("pathParameters") or {}
@@ -58,16 +82,23 @@ def lambda_handler(event, context):
 
         if method == "PUT":
             body = json.loads(event.get("body", "{}"))
-            if not validate_pk_sk(body):
-                logger.warning("Missing or invalid PK/SK in PUT body")
-                return ErrorResponse.build("Missing or invalid PK or SK in body", 400)
-            body.setdefault("updated_date", context.aws_request_id if context else "")
+            # Validate schema
             try:
-                table.put_item(Item=body)
+                device = DeviceDetails(**body)
+                if not DeviceDetails.validate_pk(device.PK):
+                    logger.warning("PK does not start with 'device-'")
+                    return ErrorResponse.build("PK must start with 'device-'", 400)
+            except ValidationError as ve:
+                logger.warning(f"Schema validation failed: {ve}")
+                return ErrorResponse.build(f"Invalid device details: {ve}", 400)
+            item = device.dict(exclude_none=True)
+            item.setdefault("updated_date", context.aws_request_id if context else "")
+            try:
+                table.put_item(Item=item)
             except Exception as e:
                 logger.error(f"DynamoDB put_item failed: {e}")
                 return ErrorResponse.build("Database error", 500)
-            return SuccessResponse.build({"message": "updated", "item": body})
+            return SuccessResponse.build({"message": "updated", "item": item})
 
         if method == "DELETE":
             params = event.get("queryStringParameters") or {}

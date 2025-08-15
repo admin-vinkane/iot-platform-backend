@@ -6,6 +6,22 @@ import boto3
 import logging
 from shared.response_utils import SuccessResponse, ErrorResponse
 
+# Add pydantic for schema validation
+from pydantic import BaseModel, ValidationError, Field
+
+# Region details schema
+class RegionDetails(BaseModel):
+    PK: str = Field(..., description="Region ID, must start with 'region-'")
+    SK: str = Field(..., description="Region type or sub-ID")
+    name: str
+    created_date: str = None
+    updated_date: str = None
+    metadata: dict = None
+
+    @classmethod
+    def validate_pk(cls, pk: str) -> bool:
+        return pk.startswith("region-")
+
 TABLE = os.environ.get("TABLE_NAME", "v_regions")
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE)
@@ -31,16 +47,23 @@ def lambda_handler(event, context):
     try:
         if method == "POST":
             body = json.loads(event.get("body", "{}"))
-            if not validate_pk_sk(body):
-                logger.warning("Missing or invalid PK/SK in POST body")
-                return ErrorResponse.build("Missing or invalid PK or SK in body", 400)
-            body.setdefault("created_date", context.aws_request_id if context else "")
+            # Validate schema
             try:
-                table.put_item(Item=body)
+                region = RegionDetails(**body)
+                if not RegionDetails.validate_pk(region.PK):
+                    logger.warning("PK does not start with 'region-'")
+                    return ErrorResponse.build("PK must start with 'region-'", 400)
+            except ValidationError as ve:
+                logger.warning(f"Schema validation failed: {ve}")
+                return ErrorResponse.build(f"Invalid region details: {ve}", 400)
+            item = region.dict(exclude_none=True)
+            item.setdefault("created_date", context.aws_request_id if context else "")
+            try:
+                table.put_item(Item=item)
             except Exception as e:
                 logger.error(f"DynamoDB put_item failed: {e}")
                 return ErrorResponse.build("Database error", 500)
-            return SuccessResponse.build({"message": "created", "item": body})
+            return SuccessResponse.build({"message": "created", "item": item})
 
         if method == "GET":
             params = event.get("queryStringParameters") or event.get("pathParameters") or {}
@@ -58,16 +81,23 @@ def lambda_handler(event, context):
 
         if method == "PUT":
             body = json.loads(event.get("body", "{}"))
-            if not validate_pk_sk(body):
-                logger.warning("Missing or invalid PK/SK in PUT body")
-                return ErrorResponse.build("Missing or invalid PK or SK in body", 400)
-            body.setdefault("updated_date", context.aws_request_id if context else "")
+            # Validate schema
             try:
-                table.put_item(Item=body)
+                region = RegionDetails(**body)
+                if not RegionDetails.validate_pk(region.PK):
+                    logger.warning("PK does not start with 'region-'")
+                    return ErrorResponse.build("PK must start with 'region-'", 400)
+            except ValidationError as ve:
+                logger.warning(f"Schema validation failed: {ve}")
+                return ErrorResponse.build(f"Invalid region details: {ve}", 400)
+            item = region.dict(exclude_none=True)
+            item.setdefault("updated_date", context.aws_request_id if context else "")
+            try:
+                table.put_item(Item=item)
             except Exception as e:
                 logger.error(f"DynamoDB put_item failed: {e}")
                 return ErrorResponse.build("Database error", 500)
-            return SuccessResponse.build({"message": "updated", "item": body})
+            return SuccessResponse.build({"message": "updated", "item": item})
 
         if method == "DELETE":
             params = event.get("queryStringParameters") or {}
