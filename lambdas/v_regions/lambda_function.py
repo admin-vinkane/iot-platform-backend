@@ -98,27 +98,95 @@ def lambda_handler(event, context):
                 logger.warning(f"Schema validation failed: {ve}")
                 return ErrorResponse.build(f"Invalid region details: {ve}", 400)
             item = region.dict(exclude_none=True)
-            # Default created_date and updated_date to sysdate if null
+            # Value constraints
+            allowed_types = {"STATE", "DISTRICT", "MANDAL", "VILLAGE", "HABITATION"}
+            if item.get("region_type") not in allowed_types:
+                return ErrorResponse.build(f"Invalid region_type: {item.get('region_type')}", 400)
+            # Length/format checks
+            import re
+            code_fields = [k for k in item if k.endswith("_code")]
+            for code in code_fields:
+                if not re.match(r"^[A-Z0-9_\-]{2,32}$", str(item[code])):
+                    return ErrorResponse.build(f"Invalid code format for {code}", 400)
+            name_fields = [k for k in item if k.endswith("_name") or k.endswith("_display_name")]
+            for name in name_fields:
+                if not isinstance(item[name], str) or len(item[name]) > 128:
+                    return ErrorResponse.build(f"Invalid or too long name for {name}", 400)
+            # Date validity
             from datetime import datetime
             sysdate = datetime.utcnow().isoformat() + "Z"
-            if not item.get("created_date"):
-                item["created_date"] = sysdate
-            if not item.get("updated_date"):
-                item["updated_date"] = sysdate
+            for date_field in ("created_date", "updated_date"):
+                if item.get(date_field):
+                    try:
+                        datetime.fromisoformat(item[date_field].replace("Z", ""))
+                    except Exception:
+                        return ErrorResponse.build(f"Invalid date format for {date_field}", 400)
+                else:
+                    item[date_field] = sysdate
             # Default created_by to 'admin' if null, updated_by always to 'admin'
             if not item.get("created_by"):
                 item["created_by"] = "admin"
             item["updated_by"] = "admin"
+            # Parent existence/referential integrity
+            parent_id = item.get("parent_id")
+            parent_type = None
+            if item["region_type"] == "DISTRICT":
+                parent_type = "STATE"
+            elif item["region_type"] == "MANDAL":
+                parent_type = "DISTRICT"
+            elif item["region_type"] == "VILLAGE":
+                parent_type = "MANDAL"
+            elif item["region_type"] == "HABITATION":
+                parent_type = "VILLAGE"
+            if parent_id and parent_type:
+                parent_key = None
+                # Try to find parent by region_id or code
+                for k in (f"{parent_type.lower()}_code", "region_id"):
+                    if k in item:
+                        parent_key = {"region_id": f"region-{parent_id}"} if k == "region_id" else {f"{k}": parent_id}
+                        break
+                if parent_key:
+                    parent_resp = table.scan(
+                        FilterExpression=f"region_type = :ptype AND {list(parent_key.keys())[0]} = :pid",
+                        ExpressionAttributeValues={":ptype": parent_type, ":pid": parent_id}
+                    )
+                    if not parent_resp.get("Items"):
+                        return ErrorResponse.build(f"Parent {parent_type} with id/code {parent_id} does not exist", 400)
+            import getpass
+            user = event.get("requestContext", {}).get("authorizer", {}).get("principalId") or getpass.getuser()
+            enable_audit = os.environ.get("ENABLE_AUDIT_LOG", "false").lower() == "true"
             try:
                 table.put_item(
                     Item=item,
                     ConditionExpression="attribute_not_exists(region_id) AND attribute_not_exists(region_type_parent_id)"
                 )
+                if enable_audit:
+                    logger.info(json.dumps({
+                        "action": "insert",
+                        "user": user,
+                        "timestamp": sysdate,
+                        "item": item
+                    }))
             except Exception as e:
                 if "ConditionalCheckFailedException" in str(e):
                     logger.warning("Duplicate item detected, not inserted.")
+                    if enable_audit:
+                        logger.info(json.dumps({
+                            "action": "skip_duplicate",
+                            "user": user,
+                            "timestamp": sysdate,
+                            "item": item
+                        }))
                     return ErrorResponse.build("Duplicate item: already exists", 409)
                 logger.error(f"DynamoDB put_item failed: {e}")
+                if enable_audit:
+                    logger.info(json.dumps({
+                        "action": "error",
+                        "user": user,
+                        "timestamp": sysdate,
+                        "item": item,
+                        "error": str(e)
+                    }))
                 return ErrorResponse.build("Database error", 500)
             return SuccessResponse.build({"message": "created", "item": item})
 
@@ -153,10 +221,35 @@ def lambda_handler(event, context):
             if not item.get("created_by"):
                 item["created_by"] = "admin"
             item["updated_by"] = "admin"
+            import getpass
+            user = event.get("requestContext", {}).get("authorizer", {}).get("principalId") or getpass.getuser()
+            enable_audit = os.environ.get("ENABLE_AUDIT_LOG", "false").lower() == "true"
             try:
-                table.put_item(Item=item)
+                response = table.update_item(
+                    Key={"region_id": item["region_id"], "region_type_parent_id": item["region_type_parent_id"]},
+                    UpdateExpression="SET " + ", ".join(f"{k} = :{k}" for k in item if k not in ["region_id", "region_type_parent_id"]),
+                    ExpressionAttributeValues={f":{k}": v for k, v in item.items() if k not in ["region_id", "region_type_parent_id"]},
+                    ConditionExpression="attribute_exists(region_id) AND attribute_exists(region_type_parent_id)",
+                    ReturnValues="ALL_NEW"
+                )
+                if enable_audit:
+                    logger.info(json.dumps({
+                        "action": "update",
+                        "user": user,
+                        "timestamp": sysdate,
+                        "item": item,
+                        "new_values": response.get("Attributes", {})
+                    }))
             except Exception as e:
                 logger.error(f"DynamoDB put_item failed: {e}")
+                if enable_audit:
+                    logger.info(json.dumps({
+                        "action": "error",
+                        "user": user,
+                        "timestamp": sysdate,
+                        "item": item,
+                        "error": str(e)
+                    }))
                 return ErrorResponse.build("Database error", 500)
             return SuccessResponse.build({"message": "updated", "item": item})
 
@@ -167,10 +260,30 @@ def lambda_handler(event, context):
                 return ErrorResponse.build("Missing or invalid PK or SK for DELETE", 400)
             pk = params.get("PK") or params.get("pk")
             sk = params.get("SK") or params.get("sk")
+            import getpass
+            user = event.get("requestContext", {}).get("authorizer", {}).get("principalId") or getpass.getuser()
+            enable_audit = os.environ.get("ENABLE_AUDIT_LOG", "false").lower() == "true"
             try:
                 table.delete_item(Key={"PK": pk, "SK": sk})
+                if enable_audit:
+                    logger.info(json.dumps({
+                        "action": "delete",
+                        "user": user,
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "region_id": pk,
+                        "region_type_parent_id": sk
+                    }))
             except Exception as e:
                 logger.error(f"DynamoDB delete_item failed: {e}")
+                if enable_audit:
+                    logger.info(json.dumps({
+                        "action": "error",
+                        "user": user,
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "region_id": pk,
+                        "region_type_parent_id": sk,
+                        "error": str(e)
+                    }))
                 return ErrorResponse.build("Database error", 500)
             return SuccessResponse.build({"message": "deleted"})
 
