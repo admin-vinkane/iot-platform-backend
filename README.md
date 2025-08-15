@@ -42,19 +42,21 @@ This project provides backend Lambda functions for IoT device and region managem
 - Ensure CloudWatch metrics and alarms are set for Lambda errors and throttles.
 ## Deployment
 
-To create zip files for each Lambda (for local use or manual upload):
-```sh
-./scripts/build_zip_only.sh
-```
-This will create `dist/v_devices.zip` and `dist/v_regions.zip`.
 
-### 2. Build and Upload to S3 (With Versioning)
-To build the Lambda zip files and upload them to your S3 bucket with versioning:
+### Lambda Packaging & Deployment
+
+To package all Lambda functions (with shared code and dependencies) for local use or manual upload:
 ```sh
-chmod +x scripts/build_and_upload.sh
-./scripts/build_and_upload.sh
+chmod +x scripts/package_and_upload_all_lambdas.sh
+./scripts/package_and_upload_all_lambdas.sh
 ```
-This will zip each Lambda, version by git commit, and upload to S3 at:
+This will create zip files for each Lambda in the `dist/` directory.
+
+To package and upload all Lambda zip files to your S3 bucket with versioning:
+```sh
+./scripts/package_and_upload_all_lambdas.sh --upload
+```
+This will upload each Lambda zip to:
 ```
 s3://my-lambda-bucket/<lambda>/<commit-hash>/<lambda>.zip
 ```
