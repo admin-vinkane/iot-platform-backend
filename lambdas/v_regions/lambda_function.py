@@ -18,6 +18,9 @@ class RegionDetails(BaseModel):
     updated_date: str = None
     metadata: dict = None
 
+    class Config:
+        extra = "forbid"  # Disallow extra fields
+
     @classmethod
     def validate_pk(cls, pk: str) -> bool:
         return pk.startswith("region-")
