@@ -1,1 +1,0 @@
-# Create operation for v_installed_device_registration_usage
