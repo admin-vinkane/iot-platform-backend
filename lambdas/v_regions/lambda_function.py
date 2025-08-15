@@ -110,8 +110,14 @@ def lambda_handler(event, context):
                 item["created_by"] = "admin"
             item["updated_by"] = "admin"
             try:
-                table.put_item(Item=item)
+                table.put_item(
+                    Item=item,
+                    ConditionExpression="attribute_not_exists(region_id) AND attribute_not_exists(region_type_parent_id)"
+                )
             except Exception as e:
+                if "ConditionalCheckFailedException" in str(e):
+                    logger.warning("Duplicate item detected, not inserted.")
+                    return ErrorResponse.build("Duplicate item: already exists", 409)
                 logger.error(f"DynamoDB put_item failed: {e}")
                 return ErrorResponse.build("Database error", 500)
             return SuccessResponse.build({"message": "created", "item": item})
