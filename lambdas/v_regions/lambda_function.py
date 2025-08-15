@@ -11,12 +11,52 @@ from pydantic import BaseModel, ValidationError, Field
 
 # Region details schema
 class RegionDetails(BaseModel):
-    PK: str = Field(..., description="Region ID, must start with 'region-'")
-    SK: str = Field(..., description="Region type or sub-ID")
-    name: str
+    @classmethod
+    def validate_for_type(cls, data):
+        region_type = data.get("region_type")
+        required = []
+        if region_type == "STATE":
+            required = ["region_id", "region_type_parent_id", "region_type", "state_code", "state_name", "state_display_name"]
+        elif region_type == "DISTRICT":
+            required = ["region_id", "region_type_parent_id", "region_type", "district_code", "district_name", "district_display_name", "parent_id"]
+        elif region_type == "MANDAL":
+            required = ["region_id", "region_type_parent_id", "region_type", "mandal_code", "mandal_name", "mandal_display_name", "parent_id"]
+        elif region_type == "VILLAGE":
+            required = ["region_id", "region_type_parent_id", "region_type", "village_code", "village_name", "village_display_name", "parent_id"]
+        elif region_type == "HABITATION":
+            required = ["region_id", "region_type_parent_id", "region_type", "habitation_code", "habitation_name", "habitation_display_name", "parent_id"]
+        missing = [f for f in required if not data.get(f)]
+        if missing:
+            raise ValueError(f"Missing required fields for {region_type}: {', '.join(missing)}")
+    region_id: str = None
+    region_type_parent_id: str = None
+    region_type: str = None
+    # State fields
+    state_code: str = None
+    state_name: str = None
+    state_display_name: str = None
+    # District fields
+    district_code: str = None
+    district_name: str = None
+    district_display_name: str = None
+    # Mandal fields
+    mandal_code: str = None
+    mandal_name: str = None
+    mandal_display_name: str = None
+    # Village fields
+    village_code: str = None
+    village_name: str = None
+    village_display_name: str = None
+    # Habitation fields
+    habitation_code: str = None
+    habitation_name: str = None
+    habitation_display_name: str = None
+    # Common fields
+    parent_id: str = None
     created_date: str = None
     updated_date: str = None
-    metadata: dict = None
+    created_by: str = None
+    updated_by: str = None
 
     class Config:
         extra = "forbid"  # Disallow extra fields
@@ -52,15 +92,23 @@ def lambda_handler(event, context):
             body = json.loads(event.get("body", "{}"))
             # Validate schema
             try:
+                RegionDetails.validate_for_type(body)
                 region = RegionDetails(**body)
-                if not RegionDetails.validate_pk(region.PK):
-                    logger.warning("PK does not start with 'region-'")
-                    return ErrorResponse.build("PK must start with 'region-'", 400)
-            except ValidationError as ve:
+            except (ValidationError, ValueError) as ve:
                 logger.warning(f"Schema validation failed: {ve}")
                 return ErrorResponse.build(f"Invalid region details: {ve}", 400)
             item = region.dict(exclude_none=True)
-            item.setdefault("created_date", context.aws_request_id if context else "")
+            # Default created_date and updated_date to sysdate if null
+            from datetime import datetime
+            sysdate = datetime.utcnow().isoformat() + "Z"
+            if not item.get("created_date"):
+                item["created_date"] = sysdate
+            if not item.get("updated_date"):
+                item["updated_date"] = sysdate
+            # Default created_by to 'admin' if null, updated_by always to 'admin'
+            if not item.get("created_by"):
+                item["created_by"] = "admin"
+            item["updated_by"] = "admin"
             try:
                 table.put_item(Item=item)
             except Exception as e:
@@ -86,15 +134,19 @@ def lambda_handler(event, context):
             body = json.loads(event.get("body", "{}"))
             # Validate schema
             try:
+                RegionDetails.validate_for_type(body)
                 region = RegionDetails(**body)
-                if not RegionDetails.validate_pk(region.PK):
-                    logger.warning("PK does not start with 'region-'")
-                    return ErrorResponse.build("PK must start with 'region-'", 400)
-            except ValidationError as ve:
+            except (ValidationError, ValueError) as ve:
                 logger.warning(f"Schema validation failed: {ve}")
                 return ErrorResponse.build(f"Invalid region details: {ve}", 400)
             item = region.dict(exclude_none=True)
-            item.setdefault("updated_date", context.aws_request_id if context else "")
+            from datetime import datetime
+            sysdate = datetime.utcnow().isoformat() + "Z"
+            item["updated_date"] = sysdate
+            # Default created_by to 'admin' if null, updated_by always to 'admin'
+            if not item.get("created_by"):
+                item["created_by"] = "admin"
+            item["updated_by"] = "admin"
             try:
                 table.put_item(Item=item)
             except Exception as e:
