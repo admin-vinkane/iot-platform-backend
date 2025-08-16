@@ -5,14 +5,41 @@
 
 set -e
 
+
 LAMBDA_ROOT="lambdas"
 DIST_DIR="dist"
 SCRIPT_DIR="$(dirname "$0")"
 UPLOAD=false
 BUCKET="my-lambda-bucket"
 
-if [ "$1" == "--upload" ]; then
-  UPLOAD=true
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --upload)
+      UPLOAD=true
+      shift
+      ;;
+    --bucket)
+      BUCKET="$2"
+      shift 2
+      ;;
+    --env)
+      ENV="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+# Default bucket based on environment if not set
+if [ "$BUCKET" == "my-lambda-bucket" ]; then
+  if [ "$ENV" == "prod" ]; then
+    BUCKET="my-lambda-bucket-prod"
+  else
+    BUCKET="my-lambda-bucket-dev"
+  fi
 fi
 
 if [ -d .git ]; then

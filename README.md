@@ -15,18 +15,18 @@ This project provides backend Lambda functions for IoT device and region managem
 ## Setup
 1. Clone the repo and install dependencies for each Lambda:
   ```sh
-
-- Use AWS Secrets Manager or SSM Parameter Store for secrets, not plain environment variables.
-- All Lambda code uses structured logging and robust error handling.
-- IAM policies follow least privilege principle.
-  pip install -r lambdas/v_devices/requirements.txt
-  pip install -r lambdas/v_regions/requirements.txt
-- Automated CI runs linting (`flake8`), formatting (`black`), type checking (`mypy`), and tests (`pytest`).
-- Add new dependencies to `requirements.txt` and `requirements-dev.txt`.
-- Use `requirements-dev.txt` for development dependencies.
-- All code should be formatted with `black` and pass `flake8` and `mypy`.
-- Add/expand tests in `tests/` for new features or bugfixes.
+  pip3 install -r lambdas/v_devices/requirements.txt
+  pip3 install -r lambdas/v_regions/requirements.txt
+  ```
 2. Configure AWS CLI and credentials.
+3. Use AWS Secrets Manager or SSM Parameter Store for secrets, not plain environment variables.
+4. All Lambda code uses structured logging and robust error handling.
+5. IAM policies follow least privilege principle.
+6. Automated CI runs linting (`flake8`), formatting (`black`), type checking (`mypy`), and tests (`pytest`).
+7. Add new dependencies to `requirements.txt` and `requirements-dev.txt`.
+8. Use `requirements-dev.txt` for development dependencies.
+9. All code should be formatted with `black` and pass `flake8` and `mypy`.
+10. Add/expand tests in `tests/` for new features or bugfixes.
 ## API Documentation
 - Document all API endpoints and payloads in an OpenAPI/Swagger spec (recommended: `openapi.yaml`).
 - Add example event payloads and error responses for each Lambda in the docs.
@@ -54,6 +54,7 @@ pip install -r lambdas/v_devices/requirements.txt
 pip install -r lambdas/v_regions/requirements.txt
 ```
 
+s3://<your-lambda-bucket>/<lambda>/<commit-hash>/<lambda>.zip
 ### 2. Package all Lambda functions
 ```sh
 chmod +x scripts/package_and_upload_all_lambdas.sh
@@ -61,9 +62,14 @@ chmod +x scripts/package_and_upload_all_lambdas.sh
 ```
 This creates zip files for each Lambda in the `dist/` directory.
 
-### 3. Upload Lambda packages to S3
+### 3. Upload Lambda packages to S3 (dev/prod)
+For development:
 ```sh
-./scripts/package_and_upload_all_lambdas.sh --upload
+./scripts/package_and_upload_all_lambdas.sh --upload --env dev
+```
+For production:
+```sh
+./scripts/package_and_upload_all_lambdas.sh --upload --env prod
 ```
 This uploads each Lambda zip to:
 ```
@@ -86,21 +92,15 @@ s3://<your-lambda-bucket>/<lambda>/<commit-hash>/<lambda>.zip
 ### 6. Testing
 - Run unit tests:
   ```sh
-  python -m unittest discover tests
+  python3 -m unittest discover tests
   ```
 
----
 
 ## API Usage
 Each Lambda expects HTTP events with the following:
 - `POST`/`PUT`: JSON body with `PK` and `SK` (string IDs)
 - `GET`/`DELETE`: Query/path params with `PK` and `SK`
 
-## Testing
-Run unit tests:
-```sh
-python -m unittest discover tests
-```
 
 ## Security
 - IAM policies grant only DynamoDB and CloudWatch Logs access for each Lambda.
