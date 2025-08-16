@@ -42,6 +42,53 @@ This project provides backend Lambda functions for IoT device and region managem
 - Ensure CloudWatch metrics and alarms are set for Lambda errors and throttles.
 
 ## Build & Deploy
+## Lambda Packaging & S3 Upload
+
+You can package and upload Lambda functions using the provided scripts. All packaging is done in a Linux-compatible environment using Docker for AWS Lambda compatibility.
+
+### Batch: Package & Upload All Lambdas
+
+**Package all Lambdas (no upload):**
+```sh
+chmod +x scripts/package_and_upload_all_lambdas.sh
+./scripts/package_and_upload_all_lambdas.sh
+```
+Zips are created in the `dist/` directory.
+
+**Package and upload all Lambdas to S3:**
+```sh
+# For development
+./scripts/package_and_upload_all_lambdas.sh --upload --env dev
+# For production
+./scripts/package_and_upload_all_lambdas.sh --upload --env prod
+```
+Zips are uploaded to:
+```
+s3://<your-lambda-bucket>/<lambda>/<commit-hash>/<lambda>.zip
+```
+
+### Single Lambda: Package & Upload
+
+**Package and upload a single Lambda:**
+```sh
+chmod +x scripts/package_and_upload_lambda.sh
+./scripts/package_and_upload_lambda.sh lambdas/<lambda_name> dist/<lambda_name>.zip <your-lambda-bucket> <version>
+```
+Example:
+```sh
+./scripts/package_and_upload_lambda.sh lambdas/v_devices dist/v_devices.zip my-lambda-bucket-vinkane-dev 123abc
+```
+This creates and uploads the zip to:
+```
+s3://my-lambda-bucket-vinkane-dev/v_devices/123abc/v_devices.zip
+```
+
+**Note:**
+- All scripts run in Docker for Linux compatibility.
+- The `--env` flag sets the S3 bucket for dev/prod.
+- The `<version>` is typically the git commit hash.
+
+See script headers for more options and usage details.
 
 ### Prerequisites
 - Python 3.8+ and pip
