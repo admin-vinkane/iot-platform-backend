@@ -40,26 +40,56 @@ This project provides backend Lambda functions for IoT device and region managem
 
 ## Monitoring
 - Ensure CloudWatch metrics and alarms are set for Lambda errors and throttles.
-## Deployment
 
+## Build & Deploy
 
-### Lambda Packaging & Deployment
+### Prerequisites
+- Python 3.8+ and pip
+- AWS CLI configured with credentials and region
+- S3 bucket for Lambda deployment packages
 
-To package all Lambda functions (with shared code and dependencies) for local use or manual upload:
+### 1. Install dependencies
+```sh
+pip install -r lambdas/v_devices/requirements.txt
+pip install -r lambdas/v_regions/requirements.txt
+```
+
+### 2. Package all Lambda functions
 ```sh
 chmod +x scripts/package_and_upload_all_lambdas.sh
 ./scripts/package_and_upload_all_lambdas.sh
 ```
-This will create zip files for each Lambda in the `dist/` directory.
+This creates zip files for each Lambda in the `dist/` directory.
 
-To package and upload all Lambda zip files to your S3 bucket with versioning:
+### 3. Upload Lambda packages to S3
 ```sh
 ./scripts/package_and_upload_all_lambdas.sh --upload
 ```
-This will upload each Lambda zip to:
+This uploads each Lambda zip to:
 ```
-s3://my-lambda-bucket/<lambda>/<commit-hash>/<lambda>.zip
+s3://<your-lambda-bucket>/<lambda>/<commit-hash>/<lambda>.zip
 ```
+
+### 4. Deploy/Update Lambda functions
+- Update your infrastructure (e.g., with Terraform) to point to the new S3 object/version for each Lambda.
+- Example (Terraform):
+  - Set the Lambda source code S3 key and version in your module/variable.
+  - Run:
+    ```sh
+    terraform init
+    terraform apply
+    ```
+
+### 5. Environment Variables
+- Set required environment variables for each Lambda (e.g., TABLE_NAME, ENABLE_AUDIT_LOG) in your deployment config or AWS Console.
+
+### 6. Testing
+- Run unit tests:
+  ```sh
+  python -m unittest discover tests
+  ```
+
+---
 
 ## API Usage
 Each Lambda expects HTTP events with the following:

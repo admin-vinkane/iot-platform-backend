@@ -22,7 +22,7 @@ cp -r "$SHARED_DIR" "$TMP_DIR/"
 
 # Install Python dependencies if requirements.txt exists
 if [ -f "$LAMBDA_DIR/requirements.txt" ]; then
-  pip install -r "$LAMBDA_DIR/requirements.txt" -t "$TMP_DIR" --upgrade
+  pip3 install -r "$LAMBDA_DIR/requirements.txt" -t "$TMP_DIR" --upgrade
 fi
 
 # Create zip
