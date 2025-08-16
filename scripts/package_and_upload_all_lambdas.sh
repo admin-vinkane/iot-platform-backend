@@ -36,9 +36,9 @@ done
 # Default bucket based on environment if not set
 if [ "$BUCKET" == "my-lambda-bucket" ]; then
   if [ "$ENV" == "prod" ]; then
-    BUCKET="my-lambda-bucket-prod"
+    BUCKET="my-lambda-bucket-vinkane-prod"
   else
-    BUCKET="my-lambda-bucket-dev"
+    BUCKET="my-lambda-bucket-vinkane-dev"
   fi
 fi
 

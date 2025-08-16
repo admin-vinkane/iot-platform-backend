@@ -76,7 +76,7 @@ dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE)
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 def validate_pk_sk(data):
     """Validate PK and SK presence and type."""
@@ -87,36 +87,55 @@ def validate_pk_sk(data):
     return isinstance(pk, str) and isinstance(sk, str) and pk and sk
 
 def lambda_handler(event, context):
+    logger.error("Lambda handler started - DEBUG logging enabled")
     """
     Lambda handler for v_regions CRUD operations.
     Supports POST, GET, PUT, DELETE methods.
     """
     method = event.get("httpMethod") or event.get("requestContext",{}).get("http",{}).get("method")
     logger.info(f"Received event: {json.dumps(event)}")
+    # Debug: Log method and raw body
+    logger.debug(f"HTTP method: {method}")
+    logger.debug(f"Raw event body: {event.get('body')}")
     try:
         if method == "POST":
-            body = json.loads(event.get("body", "{}"))
+            try:
+                logger.debug("Parsing event body...")
+                body = json.loads(event.get("body", "{}"))
+                logger.debug(f"Parsed body: {body}")
+            except Exception as e:
+                logger.error(f"Failed to parse body: {e}")
+                return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
+
             # Validate schema
             try:
+                logger.debug("Validating schema for region_type...")
                 RegionDetails.validate_for_type(body)
+                logger.debug("Schema validation passed.")
                 region = RegionDetails(**body)
+                logger.debug(f"RegionDetails object: {region}")
             except (ValidationError, ValueError) as ve:
                 logger.warning(f"Schema validation failed: {ve}")
                 return ErrorResponse.build(f"Invalid region details: {ve}", 400)
+
             item = region.dict(exclude_none=True)
+            logger.debug(f"DynamoDB item to be written: {item}")
             # Value constraints
             allowed_types = {"STATE", "DISTRICT", "MANDAL", "VILLAGE", "HABITATION"}
             if item.get("region_type") not in allowed_types:
+                logger.error(f"Invalid region_type: {item.get('region_type')}")
                 return ErrorResponse.build(f"Invalid region_type: {item.get('region_type')}", 400)
             # Length/format checks
             import re
             code_fields = [k for k in item if k.endswith("_code")]
             for code in code_fields:
                 if not re.match(r"^[A-Z0-9_\-]{2,32}$", str(item[code])):
+                    logger.error(f"Invalid code format for {code}: {item[code]}")
                     return ErrorResponse.build(f"Invalid code format for {code}", 400)
             name_fields = [k for k in item if k.endswith("_name") or k.endswith("_display_name")]
             for name in name_fields:
                 if not isinstance(item[name], str) or len(item[name]) > 128:
+                    logger.error(f"Invalid or too long name for {name}: {item[name]}")
                     return ErrorResponse.build(f"Invalid or too long name for {name}", 400)
             # Date validity
             from datetime import datetime
