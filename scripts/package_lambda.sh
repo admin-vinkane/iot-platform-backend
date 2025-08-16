@@ -4,6 +4,12 @@
 
 set -e
 
+# Check for required CLI tools
+if ! command -v pip3 >/dev/null 2>&1; then
+  echo "Error: pip3 is not installed. Please install pip3 (Python 3) to build Lambda packages." >&2
+  exit 1
+fi
+
 LAMBDA_DIR="$1"
 OUTPUT_ZIP="$2"
 SHARED_DIR="shared"
@@ -20,14 +26,25 @@ cp -r "$LAMBDA_DIR"/* "$TMP_DIR"/
 # Copy shared utils
 cp -r "$SHARED_DIR" "$TMP_DIR/"
 
+
 # Install Python dependencies if requirements.txt exists
 if [ -f "$LAMBDA_DIR/requirements.txt" ]; then
-  pip3 install -r "$LAMBDA_DIR/requirements.txt" -t "$TMP_DIR" --upgrade
+  if ! pip3 install -r "$LAMBDA_DIR/requirements.txt" -t "$TMP_DIR" --upgrade; then
+    echo "Error: pip3 failed to install dependencies for $LAMBDA_DIR. Check requirements.txt and your Python environment." >&2
+    rm -rf "$TMP_DIR"
+    exit 1
+  fi
 fi
+
 
 # Create zip
 cd "$TMP_DIR"
-zip -r9 "$OLDPWD/$OUTPUT_ZIP" .
+if ! zip -r9 "$OLDPWD/$OUTPUT_ZIP" .; then
+  echo "Error: Failed to create zip archive $OUTPUT_ZIP." >&2
+  cd "$OLDPWD"
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
 cd "$OLDPWD"
 
 # Clean up

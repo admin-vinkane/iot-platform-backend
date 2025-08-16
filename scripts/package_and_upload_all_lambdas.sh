@@ -5,6 +5,12 @@
 
 set -e
 
+# Check for required CLI tools
+if ! command -v aws >/dev/null 2>&1; then
+  echo "Error: aws CLI is not installed. Please install AWS CLI and configure credentials." >&2
+  exit 1
+fi
+
 
 LAMBDA_ROOT="lambdas"
 DIST_DIR="dist"
@@ -34,7 +40,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Default bucket based on environment if not set
-if [ "$BUCKET" == "my-lambda-bucket" ]; then
+if [ "$BUCKET" = "my-lambda-bucket" ]; then
   if [ "$ENV" == "prod" ]; then
     BUCKET="my-lambda-bucket-vinkane-prod"
   else

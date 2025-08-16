@@ -1,0 +1,14 @@
+# Ignore Python build and dist folders
+__pycache__/
+dist/
+build/
+*.egg-info/
+
+# Ignore VSCode settings
+.vscode/
+
+# Ignore OS files
+.DS_Store
+
+# Ignore zip and package artifacts
+*.zip
