@@ -24,7 +24,11 @@ class RegionDetails(BaseModel):
         elif region_type == "VILLAGE":
             required = ["region_id", "region_type_parent_id", "region_type", "village_code", "village_name", "village_display_name", "parent_id"]
         elif region_type == "HABITATION":
-            required = ["region_id", "region_type_parent_id", "region_type", "habitation_code", "habitation_name", "habitation_display_name", "parent_id"]
+                required = [
+                    "region_id", "region_type_parent_id", "region_type",
+                    "habitation_code", "habitation_name", "habitation_display_name", "parent_id",
+                    "motor_capacity", "tank_capacity"
+                ]
         missing = [f for f in required if not data.get(f)]
         if missing:
             raise ValueError(f"Missing required fields for {region_type}: {', '.join(missing)}")
@@ -51,6 +55,8 @@ class RegionDetails(BaseModel):
     habitation_code: str = None
     habitation_name: str = None
     habitation_display_name: str = None
+    motor_capacity: str = None
+    tank_capacity: str = None
     # Common fields
     parent_id: str = None
     created_date: str = None
