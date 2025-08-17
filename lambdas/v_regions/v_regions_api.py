@@ -38,28 +38,35 @@ class RegionDetails(BaseModel):
     region_id: str = None
     region_type_parent_id: str = None
     region_type: str = None
+
     state_code: str = None
     state_name: str = None
     state_display_name: str = None
+
     district_code: str = None
     district_name: str = None
     district_display_name: str = None
+
     mandal_code: str = None
     mandal_name: str = None
     mandal_display_name: str = None
+
     village_code: str = None
     village_name: str = None
     village_display_name: str = None
+
     habitation_code: str = None
     habitation_name: str = None
     habitation_display_name: str = None
     motor_capacity: str = None
     tank_capacity: str = None
+
     parent_id: str = None
     created_date: str = None
     updated_date: str = None
     created_by: str = None
     updated_by: str = None
+    
     class Config:
         extra = "forbid"
     @classmethod

@@ -76,16 +76,50 @@ fi
 
 mkdir -p "$DIST_DIR"
 
+
+# Track S3 keys for tfvars output
+TFVARS_SNIPPET=""
+
 for LAMBDA in "$LAMBDA_ROOT"/*; do
   if [ -d "$LAMBDA" ]; then
     NAME=$(basename "$LAMBDA")
     "$SCRIPT_DIR/package_lambda.sh" "$LAMBDA" "$DIST_DIR/${NAME}.zip"
+    S3_KEY="${NAME}/$VERSION/${NAME}.zip"
     if [ "$UPLOAD" = true ]; then
-  echo "Uploading $DIST_DIR/${NAME}.zip to s3://$BUCKET/${NAME}/$VERSION/${NAME}.zip"
-  aws s3 cp "$DIST_DIR/${NAME}.zip" "s3://$BUCKET/${NAME}/$VERSION/${NAME}.zip"
+      echo "Uploading $DIST_DIR/${NAME}.zip to s3://$BUCKET/$S3_KEY"
+      aws s3 cp "$DIST_DIR/${NAME}.zip" "s3://$BUCKET/$S3_KEY"
+      echo "[INFO] S3 key for $NAME: $S3_KEY"
+      # Append tfvars snippet
+      TFVARS_SNIPPET+="${NAME}_lambda_s3_key = \"$S3_KEY\"\n"
     fi
   fi
 done
+
+
+# Write tfvars snippet and update dev.tfvars
+if [ "$UPLOAD" = true ] && [ -n "$TFVARS_SNIPPET" ]; then
+  echo -e "\n[INFO] Terraform .tfvars snippet for Lambda S3 keys:"
+  echo -e "$TFVARS_SNIPPET"
+
+
+  # Path to tfvars files
+  DEV_TFVARS="../../iot-platform-infra/dev.tfvars"
+  PROD_TFVARS="../../iot-platform-infra/prod.tfvars"
+  # Choose which tfvars to update based on --env
+  if [ "$ENV" == "prod" ]; then
+    TARGET_TFVARS="$PROD_TFVARS"
+  else
+    TARGET_TFVARS="$DEV_TFVARS"
+  fi
+  if [ -f "$TARGET_TFVARS" ]; then
+    grep -v '_lambda_s3_key[ ]*=' "$TARGET_TFVARS" > "$TARGET_TFVARS.tmp" || true
+    echo -e "$TFVARS_SNIPPET" >> "$TARGET_TFVARS.tmp"
+    mv "$TARGET_TFVARS.tmp" "$TARGET_TFVARS"
+    echo "[INFO] Updated $TARGET_TFVARS with latest Lambda S3 keys."
+  else
+    echo "[WARN] $TARGET_TFVARS not found. Please update your tfvars file manually."
+  fi
+fi
 
 if [ "$UPLOAD" = true ]; then
   echo "All Lambdas packaged and uploaded to S3. Version: $VERSION"
