@@ -5,7 +5,7 @@ import boto3
 import logging
 from shared.response_utils import SuccessResponse, ErrorResponse
 from pydantic import BaseModel, ValidationError, Field
-
+#tej
 def validate_pk_sk(data):
     if not isinstance(data, dict):
         return False
@@ -198,17 +198,25 @@ def lambda_handler(event, context):
 
         if method == "GET":
             params = event.get("queryStringParameters") or event.get("pathParameters") or {}
-            if not validate_pk_sk(params):
-                logger.warning("Missing or invalid PK/SK in GET params")
-                return ErrorResponse.build("Missing or invalid PK or SK for GET", 400)
-            pk = params.get("PK") or params.get("pk")
-            sk = params.get("SK") or params.get("sk")
+            # If PK/SK provided, fetch single item
+            if validate_pk_sk(params):
+                pk = params.get("PK") or params.get("pk")
+                sk = params.get("SK") or params.get("sk")
+                try:
+                    r = table.get_item(Key={"PK": pk, "SK": sk})
+                except Exception as e:
+                    logger.error(f"DynamoDB get_item failed: {e}")
+                    return ErrorResponse.build("Database error", 500)
+                return SuccessResponse.build(r.get("Item"))
+            # If no PK/SK, return all states
             try:
-                r = table.get_item(Key={"PK": pk, "SK": sk})
+                from boto3.dynamodb.conditions import Attr
+                response = table.scan(FilterExpression=Attr('region_type').eq('STATE'))
+                items = response.get('Items', [])
             except Exception as e:
-                logger.error(f"DynamoDB get_item failed: {e}")
+                logger.error(f"DynamoDB scan failed: {e}")
                 return ErrorResponse.build("Database error", 500)
-            return SuccessResponse.build(r.get("Item"))
+            return SuccessResponse.build(items)
 
         if method == "PUT":
             body = json.loads(event.get("body", "{}"))
