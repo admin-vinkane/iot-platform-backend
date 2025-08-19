@@ -1,4 +1,3 @@
-
 import json
 import os
 import boto3
@@ -6,12 +5,13 @@ import logging
 from shared.response_utils import SuccessResponse, ErrorResponse
 from pydantic import BaseModel, ValidationError, Field
 #tej
-def validate_pk_sk(data):
+
+def validate_region_keys(data):
     if not isinstance(data, dict):
         return False
-    pk = data.get("PK") or data.get("pk")
-    sk = data.get("SK") or data.get("sk")
-    return isinstance(pk, str) and isinstance(sk, str) and pk and sk
+    region_id = data.get("region_id")
+    region_type_parent_id = data.get("region_type_parent_id")
+    return isinstance(region_id, str) and isinstance(region_type_parent_id, str) and region_id and region_type_parent_id
 
 class RegionDetails(BaseModel):
     @classmethod
@@ -198,17 +198,17 @@ def lambda_handler(event, context):
 
         if method == "GET":
             params = event.get("queryStringParameters") or event.get("pathParameters") or {}
-            # If PK/SK provided, fetch single item
-            if validate_pk_sk(params):
-                pk = params.get("PK") or params.get("pk")
-                sk = params.get("SK") or params.get("sk")
+            # Validate region_id and region_type_parent_id
+            if validate_region_keys(params):
+                region_id = params.get("region_id")
+                region_type_parent_id = params.get("region_type_parent_id")
                 try:
-                    r = table.get_item(Key={"PK": pk, "SK": sk})
+                    r = table.get_item(Key={"region_id": region_id, "region_type_parent_id": region_type_parent_id})
                 except Exception as e:
                     logger.error(f"DynamoDB get_item failed: {e}")
                     return ErrorResponse.build("Database error", 500)
                 return SuccessResponse.build(r.get("Item"))
-            # If no PK/SK, return all states
+            # If no region_id/region_type_parent_id, return all states
             try:
                 from boto3.dynamodb.conditions import Attr
                 response = table.scan(FilterExpression=Attr('region_type').eq('STATE'))
@@ -267,23 +267,24 @@ def lambda_handler(event, context):
 
         if method == "DELETE":
             params = event.get("queryStringParameters") or {}
-            if not validate_pk_sk(params):
-                logger.warning("Missing or invalid PK/SK in DELETE params")
-                return ErrorResponse.build("Missing or invalid PK or SK for DELETE", 400)
-            pk = params.get("PK") or params.get("pk")
-            sk = params.get("SK") or params.get("sk")
+            # Validate region_id and region_type_parent_id
+            if not validate_region_keys(params):
+                logger.warning("Missing or invalid region_id/region_type_parent_id in DELETE params")
+                return ErrorResponse.build("Missing or invalid region_id or region_type_parent_id for DELETE", 400)
+            region_id = params.get("region_id")
+            region_type_parent_id = params.get("region_type_parent_id")
             import getpass
             user = event.get("requestContext", {}).get("authorizer", {}).get("principalId") or getpass.getuser()
             enable_audit = os.environ.get("ENABLE_AUDIT_LOG", "false").lower() == "true"
             try:
-                table.delete_item(Key={"PK": pk, "SK": sk})
+                table.delete_item(Key={"region_id": region_id, "region_type_parent_id": region_type_parent_id})
                 if enable_audit:
                     logger.info(json.dumps({
                         "action": "delete",
                         "user": user,
                         "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "region_id": pk,
-                        "region_type_parent_id": sk
+                        "region_id": region_id,
+                        "region_type_parent_id": region_type_parent_id
                     }))
             except Exception as e:
                 logger.error(f"DynamoDB delete_item failed: {e}")
@@ -292,8 +293,8 @@ def lambda_handler(event, context):
                         "action": "error",
                         "user": user,
                         "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "region_id": pk,
-                        "region_type_parent_id": sk,
+                        "region_id": region_id,
+                        "region_type_parent_id": region_type_parent_id,
                         "error": str(e)
                     }))
                 return ErrorResponse.build("Database error", 500)
