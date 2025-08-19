@@ -72,16 +72,35 @@ s3://<your-lambda-bucket>/<lambda>/<commit-hash>/<lambda>.zip
 **Package and upload a single Lambda:**
 ```sh
 chmod +x scripts/package_and_upload_lambda.sh
-./scripts/package_and_upload_lambda.sh lambdas/<lambda_name> dist/<lambda_name>.zip <your-lambda-bucket> <version>
+./scripts/package_and_upload_lambda.sh <lambda_dir> --env dev|prod [--upload]
 ```
-Example:
+
+**Usage:**
+- `<lambda_dir>` - Lambda directory (e.g., `lambdas/v_devices`)
+- `--env dev|prod` - Environment (mandatory)
+- `--upload` - Upload to S3 (optional, without this flag it only packages locally)
+
+**Examples:**
 ```sh
-./scripts/package_and_upload_lambda.sh lambdas/v_devices dist/v_devices.zip my-lambda-bucket-vinkane-dev 123abc
+# Just package v_devices locally (no upload)
+./scripts/package_and_upload_lambda.sh lambdas/v_devices --env dev
+
+# Package and upload v_devices to dev environment
+./scripts/package_and_upload_lambda.sh lambdas/v_devices --env dev --upload
+
+# Package and upload v_regions to prod environment  
+./scripts/package_and_upload_lambda.sh lambdas/v_regions --env prod --upload
 ```
-This creates and uploads the zip to:
-```
-s3://my-lambda-bucket-vinkane-dev/v_devices/123abc/v_devices.zip
-```
+
+**Behavior:**
+- Always creates zip in `dist/<lambda_name>.zip`
+- With `--upload`: Uploads to S3
+- Without `--upload`: Only packages locally
+- S3 bucket is automatically selected based on environment:
+  - `dev` → `my-lambda-bucket-vinkane-dev`
+  - `prod` → `my-lambda-bucket-vinkane-prod`
+- Version is automatically set to fixed version (20250816204228)
+- Uploads to S3 key: `<lambda_name>/<version>/<lambda_name>.zip`
 
 **Note:**
 - All scripts run in Docker for Linux compatibility.
