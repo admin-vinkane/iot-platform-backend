@@ -27,6 +27,40 @@ This project provides backend Lambda functions for IoT device and region managem
 8. Use `requirements-dev.txt` for development dependencies.
 9. All code should be formatted with `black` and pass `flake8` and `mypy`.
 10. Add/expand tests in `tests/` for new features or bugfixes.
+11. Python Local Environment and Virtual Env(venv) setup
+- To avoid conflicts with other python versions and packages
+- Pyenv helps switching between different python versions globally or locally at specific project level
+1. Install pyenv
+brew update
+brew install pyenv
+pyenv --version
+2. Configure your shell to use pyenv
+Add these lines to ~/.zshrc: (or whichever shell you have)
+
+export PATH="$HOME/.pyenv/bin:$PATH"
+eval "$(pyenv init --path)"
+eval "$(pyenv init -)"
+
+Reload the shell
+3. Install a python version using pyenv.
+pyenv install --list : check what is installed
+pyenv install 3.9.6 : install specific version you want
+
+pyenv global 3.9.6 : set globally
+
+cd /path/to/project : set locally for a project
+pyenv local 3.9.6
+
+4. Verify python version
+python --version
+which python
+
+5. create a venv using pyenv python version which is currently set
+python -m venv .venv
+source .venv/bin/activate
+
+Tip: Always use pyenv + venv together: pyenv manages Python versions, venv manages project dependencies.
+
 ## API Documentation
 - Document all API endpoints and payloads in an OpenAPI/Swagger spec (recommended: `openapi.yaml`).
 - Add example event payloads and error responses for each Lambda in the docs.
@@ -160,7 +194,8 @@ s3://<your-lambda-bucket>/<lambda>/<commit-hash>/<lambda>.zip
   ```sh
   python3 -m unittest discover tests
   ```
-
+- Run unit tests using pytest
+```pytest```
 
 ## API Usage
 Each Lambda expects HTTP events with the following:
