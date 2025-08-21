@@ -3,3 +3,5 @@ black
 mypy
 pytest
 pytest-cov
+-r lambdas/v_devices/requirements.txt
+-r lambdas/v_regions/requirements.txt

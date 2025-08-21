@@ -1,16 +1,19 @@
-import unittest
-from shared import response_utils
+import pytest
+from shared.response_utils import SuccessResponse, ErrorResponse
 
-class TestResponseUtils(unittest.TestCase):
-    def test_success_response(self):
-        resp = response_utils.success_response({"foo": "bar"})
-        self.assertEqual(resp["statusCode"], 200)
-        self.assertIn("foo", resp["body"])
+def test_success_response():
+    # Test a successful response
+    data = {"key": "value"}
+    resp = SuccessResponse.build(data)
+    assert resp["statusCode"] == 200
+    assert "key" in resp["body"]
+    assert resp["body"] == '{"key": "value"}'  # Ensure the body is serialized correctly
 
-    def test_error_response(self):
-        resp = response_utils.error_response("fail", 400)
-        self.assertEqual(resp["statusCode"], 400)
-        self.assertIn("fail", resp["body"])
-
-if __name__ == "__main__":
-    unittest.main()
+def test_error_response():
+    # Test an error response
+    error_message = "Something went wrong"
+    status_code = 400
+    resp = ErrorResponse.build(error_message, status_code)
+    assert resp["statusCode"] == status_code
+    assert error_message in resp["body"]
+    assert resp["body"] == '{"error": "Something went wrong"}'  # Ensure the body is serialized correctly
