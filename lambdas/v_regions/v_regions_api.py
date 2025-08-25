@@ -13,6 +13,45 @@ def validate_region_keys(data):
     region_type_parent_id = data.get("region_type_parent_id")
     return isinstance(region_id, str) and isinstance(region_type_parent_id, str) and region_id and region_type_parent_id
 
+# Add this function to transform the item
+def transform_item_to_json(item):
+    if item.get("region_type") == "DISTRICT":
+        # Derive stateId and region_type_parent_id
+        state_id = f"REGION-{item.get('parent_id')}"  # Derive state_id from parent_id
+        region_type_parent_id = f"STATE-{item.get('parent_id')}"  # Derive region_type_parent_id from parent_id
+        state_name = None
+
+        # Fetch state_name from the parent (STATE)
+        if state_id:
+            try:
+                parent_response = table.get_item(Key={"region_id": state_id, "region_type_parent_id": region_type_parent_id})
+                state_name = parent_response.get("Item", {}).get("state_name")
+            except Exception as e:
+                logger.error(f"Failed to fetch state_name for state_id {state_id}: {e}")
+        
+        return {
+            "id": item.get("region_id"),
+            "code": item.get("district_code"),
+            "name": item.get("district_name"),
+            "stateId": state_id,
+            "stateName": state_name,
+            "isActive": True,  # Assuming all items are active; adjust logic if needed
+            "createdAt": item.get("created_date"),
+            "updatedAt": item.get("updated_date"),
+            "createdBy": item.get("created_by"),
+            "updatedBy": item.get("updated_by"),
+        }
+    return {
+        "id": item.get("region_id"),
+        "code": item.get("state_code") or item.get("district_code") or item.get("mandal_code") or item.get("village_code") or item.get("habitation_code"),
+        "name": item.get("state_name") or item.get("district_name") or item.get("mandal_name") or item.get("village_name") or item.get("habitation_name"),
+        "isActive": True,  # Assuming all items are active; adjust logic if needed
+        "createdAt": item.get("created_date"),
+        "updatedAt": item.get("updated_date"),
+        "createdBy": item.get("created_by"),
+        "updatedBy": item.get("updated_by"),
+    }
+
 class RegionDetails(BaseModel):
     @classmethod
     def validate_for_type(cls, data):
@@ -207,7 +246,7 @@ def lambda_handler(event, context):
                 except Exception as e:
                     logger.error(f"DynamoDB get_item failed: {e}")
                     return ErrorResponse.build("Database error", 500)
-                return SuccessResponse.build(r.get("Item"))
+                return SuccessResponse.build(transform_item_to_json(r.get("Item")))
             # If no region_id/region_type_parent_id, return all states
             try:
                 from boto3.dynamodb.conditions import Attr
