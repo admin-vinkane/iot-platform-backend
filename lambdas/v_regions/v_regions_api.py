@@ -2,166 +2,136 @@ import json
 import os
 import boto3
 import logging
+from datetime import datetime
+import re
 from shared.response_utils import SuccessResponse, ErrorResponse
 from pydantic import BaseModel, ValidationError, Field
-#tej
 
-def validate_region_keys(data):
-    if not isinstance(data, dict):
-        return False
-    region_id = data.get("region_id")
-    region_type_parent_id = data.get("region_type_parent_id")
-    return isinstance(region_id, str) and isinstance(region_type_parent_id, str) and region_id and region_type_parent_id
-
-# Add this function to transform the item
-def transform_item_to_json(item):
-    if item.get("region_type") == "DISTRICT":
-        # Derive stateId and region_type_parent_id
-        state_id = f"REGION-{item.get('parent_id')}"  # Derive state_id from parent_id
-        region_type_parent_id = f"STATE-{item.get('parent_id')}"  # Derive region_type_parent_id from parent_id
-        state_name = None
-
-        # Fetch state_name from the parent (STATE)
-        if state_id:
-            try:
-                parent_response = table.get_item(Key={"region_id": state_id, "region_type_parent_id": region_type_parent_id})
-                state_name = parent_response.get("Item", {}).get("state_name")
-            except Exception as e:
-                logger.error(f"Failed to fetch state_name for state_id {state_id}: {e}")
-        
-        return {
-            "id": item.get("region_id"),
-            "code": item.get("district_code"),
-            "name": item.get("district_name"),
-            "stateId": state_id,
-            "stateName": state_name,
-            "isActive": True,  # Assuming all items are active; adjust logic if needed
-            "createdAt": item.get("created_date"),
-            "updatedAt": item.get("updated_date"),
-            "createdBy": item.get("created_by"),
-            "updatedBy": item.get("updated_by"),
-        }
-    return {
-        "id": item.get("region_id"),
-        "code": item.get("state_code") or item.get("district_code") or item.get("mandal_code") or item.get("village_code") or item.get("habitation_code"),
-        "name": item.get("state_name") or item.get("district_name") or item.get("mandal_name") or item.get("village_name") or item.get("habitation_name"),
-        "isActive": True,  # Assuming all items are active; adjust logic if needed
-        "createdAt": item.get("created_date"),
-        "updatedAt": item.get("updated_date"),
-        "createdBy": item.get("created_by"),
-        "updatedBy": item.get("updated_by"),
-    }
-
-class RegionDetails(BaseModel):
-    @classmethod
-    def validate_for_type(cls, data):
-        region_type = data.get("region_type")
-        required = []
-        if region_type == "STATE":
-            required = ["region_id", "region_type_parent_id", "region_type", "state_code", "state_name", "state_display_name"]
-        elif region_type == "DISTRICT":
-            required = ["region_id", "region_type_parent_id", "region_type", "district_code", "district_name", "district_display_name", "parent_id"]
-        elif region_type == "MANDAL":
-            required = ["region_id", "region_type_parent_id", "region_type", "mandal_code", "mandal_name", "mandal_display_name", "parent_id"]
-        elif region_type == "VILLAGE":
-            required = ["region_id", "region_type_parent_id", "region_type", "village_code", "village_name", "village_display_name", "parent_id"]
-        elif region_type == "HABITATION":
-            required = [
-                "region_id", "region_type_parent_id", "region_type",
-                "habitation_code", "habitation_name", "habitation_display_name", "parent_id",
-                "motor_capacity", "tank_capacity"
-            ]
-        missing = [f for f in required if not data.get(f)]
-        if missing:
-            raise ValueError(f"Missing required fields for {region_type}: {', '.join(missing)}")
-    region_id: str = None
-    region_type_parent_id: str = None
-    region_type: str = None
-
-    state_code: str = None
-    state_name: str = None
-    state_display_name: str = None
-
-    district_code: str = None
-    district_name: str = None
-    district_display_name: str = None
-
-    mandal_code: str = None
-    mandal_name: str = None
-    mandal_display_name: str = None
-
-    village_code: str = None
-    village_name: str = None
-    village_display_name: str = None
-
-    habitation_code: str = None
-    habitation_name: str = None
-    habitation_display_name: str = None
-    motor_capacity: str = None
-    tank_capacity: str = None
-
-    parent_id: str = None
-    created_date: str = None
-    updated_date: str = None
-    created_by: str = None
-    updated_by: str = None
-    
-    class Config:
-        extra = "forbid"
-    @classmethod
-    def validate_pk(cls, pk: str) -> bool:
-        return pk.startswith("region-")
-
-TABLE = os.environ.get("TABLE_NAME", "v_regions")
+# Initialize DynamoDB and logging
+TABLE_NAME = os.environ.get("TABLE_NAME", "regions")
 dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table(TABLE)
+table = dynamodb.Table(TABLE_NAME)
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
+# Validate PK and SK
+def validate_keys(params):
+    if not isinstance(params, dict):
+        return False
+    pk = params.get("PK")
+    sk = params.get("SK")
+    return isinstance(pk, str) and isinstance(sk, str) and pk and sk
+
+# Transform item to JSON response
+def transform_item_to_json(item):
+    if not item:
+        return None
+    region_type = item.get("RegionType")
+    result = {
+        "id": item.get("PK").split("#")[-1] if "#" in item.get("PK", "") else item.get("PK"),
+        "type": region_type,
+        "code": item.get("RegionCode"),
+        "name": item.get("RegionName"),
+        "isActive": True,  # Assuming all items are active
+        "createdAt": item.get("created_date"),
+        "updatedAt": item.get("updated_date"),
+        "createdBy": item.get("created_by"),
+        "updatedBy": item.get("updated_by")
+    }
+    if region_type != "STATE":
+        result["stateCode"] = item.get("StateCode")
+    if region_type in ["MANDAL", "VILLAGE", "HABITATION"]:
+        result["districtCode"] = item.get("DistrictCode")
+    if region_type in ["VILLAGE", "HABITATION"]:
+        result["mandalCode"] = item.get("MandalCode")
+    if region_type == "HABITATION":
+        result["villageCode"] = item.get("VillageCode")
+        result["path"] = item.get("Path")
+    return result
+
+# Pydantic model for validation
+class RegionDetails(BaseModel):
+    @classmethod
+    def validate_for_type(cls, data):
+        region_type = data.get("RegionType")
+        required = []
+        if region_type == "STATE":
+            required = ["PK", "SK", "RegionType", "RegionCode", "RegionName"]
+        elif region_type == "DISTRICT":
+            required = ["PK", "SK", "RegionType", "RegionCode", "RegionName", "StateCode"]
+        elif region_type == "MANDAL":
+            required = ["PK", "SK", "RegionType", "RegionCode", "RegionName", "StateCode", "DistrictCode"]
+        elif region_type == "VILLAGE":
+            required = ["PK", "SK", "RegionType", "RegionCode", "RegionName", "StateCode", "DistrictCode", "MandalCode"]
+        elif region_type == "HABITATION":
+            required = ["PK", "SK", "RegionType", "RegionCode", "RegionName", "StateCode", "DistrictCode", "MandalCode", "VillageCode", "Path"]
+        missing = [f for f in required if not data.get(f)]
+        if missing:
+            raise ValueError(f"Missing required fields for {region_type}: {', '.join(missing)}")
+
+    PK: str = None
+    SK: str = None
+    RegionType: str = None
+    RegionCode: str = None
+    RegionName: str = None
+    StateCode: str = None
+    DistrictCode: str = None
+    MandalCode: str = None
+    VillageCode: str = None
+    Path: str = None
+    created_date: str = None
+    updated_date: str = None
+    created_by: str = None
+    updated_by: str = None
+
+    class Config:
+        extra = "forbid"
+
+    @classmethod
+    def validate_pk_sk(cls, pk: str, sk: str) -> bool:
+        return pk.startswith(("STATE#", "DISTRICT#", "MANDAL#", "VILLAGE#")) and sk.startswith(("STATE#", "DISTRICT#", "MANDAL#", "VILLAGE#", "HABITATION#"))
+
+# Lambda handler
 def lambda_handler(event, context):
-    print("=== LAMBDA HANDLER STARTED ===")
-    logger.error("Lambda handler started - DEBUG logging enabled")
-    method = event.get("httpMethod") or event.get("requestContext",{}).get("http",{}).get("method")
     logger.info(f"Received event: {json.dumps(event)}")
+    method = event.get("httpMethod") or event.get("requestContext", {}).get("http", {}).get("method")
     logger.debug(f"HTTP method: {method}")
-    logger.debug(f"Raw event body: {event.get('body')}")
+
     try:
         if method == "POST":
             try:
-                logger.debug("Parsing event body...")
                 body = json.loads(event.get("body", "{}"))
                 logger.debug(f"Parsed body: {body}")
             except Exception as e:
                 logger.error(f"Failed to parse body: {e}")
                 return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
+
             try:
-                logger.debug("Validating schema for region_type...")
                 RegionDetails.validate_for_type(body)
-                logger.debug("Schema validation passed.")
                 region = RegionDetails(**body)
                 logger.debug(f"RegionDetails object: {region}")
             except (ValidationError, ValueError) as ve:
                 logger.warning(f"Schema validation failed: {ve}")
                 return ErrorResponse.build(f"Invalid region details: {ve}", 400)
+
             item = region.dict(exclude_none=True)
-            logger.debug(f"DynamoDB item to be written: {item}")
             allowed_types = {"STATE", "DISTRICT", "MANDAL", "VILLAGE", "HABITATION"}
-            if item.get("region_type") not in allowed_types:
-                logger.error(f"Invalid region_type: {item.get('region_type')}")
-                return ErrorResponse.build(f"Invalid region_type: {item.get('region_type')}", 400)
-            import re
-            code_fields = [k for k in item if k.endswith("_code")]
-            for code in code_fields:
-                if not re.match(r"^[A-Z0-9_\-]{2,32}$", str(item[code])):
-                    logger.error(f"Invalid code format for {code}: {item[code]}")
-                    return ErrorResponse.build(f"Invalid code format for {code}", 400)
-            name_fields = [k for k in item if k.endswith("_name") or k.endswith("_display_name")]
-            for name in name_fields:
-                if not isinstance(item[name], str) or len(item[name]) > 128:
-                    logger.error(f"Invalid or too long name for {name}: {item[name]}")
-                    return ErrorResponse.build(f"Invalid or too long name for {name}", 400)
-            from datetime import datetime
+            if item.get("RegionType") not in allowed_types:
+                logger.error(f"Invalid Type: {item.get('RegionType')}")
+                return ErrorResponse.build(f"Invalid Type: {item.get('RegionType')}", 400)
+
+            # Validate code format
+            if not re.match(r"^[A-Z0-9_]{2,32}$", item.get("RegionCode", "")):
+                logger.error(f"Invalid code format: {item.get('RegionCode')}")
+                return ErrorResponse.build("Invalid code format", 400)
+
+            # Validate name length
+            if not isinstance(item.get("RegionName"), str) or len(item.get("RegionName")) > 128:
+                logger.error(f"Invalid or too long name: {item.get('RegionName')}")
+                return ErrorResponse.build("Invalid or too long name", 400)
+
+            # Validate dates
             sysdate = datetime.utcnow().isoformat() + "Z"
             for date_field in ("created_date", "updated_date"):
                 if item.get(date_field):
@@ -171,39 +141,96 @@ def lambda_handler(event, context):
                         return ErrorResponse.build(f"Invalid date format for {date_field}", 400)
                 else:
                     item[date_field] = sysdate
+
             if not item.get("created_by"):
                 item["created_by"] = "admin"
             item["updated_by"] = "admin"
-            parent_id = item.get("parent_id")
-            parent_type = None
-            if item["region_type"] == "DISTRICT":
-                parent_type = "STATE"
-            elif item["region_type"] == "MANDAL":
-                parent_type = "DISTRICT"
-            elif item["region_type"] == "VILLAGE":
-                parent_type = "MANDAL"
-            elif item["region_type"] == "HABITATION":
-                parent_type = "VILLAGE"
-            if parent_id and parent_type:
-                parent_key = None
-                for k in (f"{parent_type.lower()}_code", "region_id"):
-                    if k in item:
-                        parent_key = {"region_id": f"region-{parent_id}"} if k == "region_id" else {f"{k}": parent_id}
-                        break
-                if parent_key:
-                    parent_resp = table.scan(
-                        FilterExpression=f"region_type = :ptype AND {list(parent_key.keys())[0]} = :pid",
-                        ExpressionAttributeValues={":ptype": parent_type, ":pid": parent_id}
-                    )
-                    if not parent_resp.get("Items"):
-                        return ErrorResponse.build(f"Parent {parent_type} with id/code {parent_id} does not exist", 400)
-            import getpass
-            user = event.get("requestContext", {}).get("authorizer", {}).get("principalId") or getpass.getuser()
+            # parent check
+            region_type = item.get("RegionType")
+            region_code = item.get("RegionCode")
+            region_name = item.get("RegionName")
+            state_code = item.get("StateCode")
+            district_code = item.get("DistrictCode")
+            mandal_code = item.get("MandalCode")
+            village_code = item.get("VillageCode")
+            path = item.get("Path")
+            # Validate required fields based on RegionType
+            if not region_type or not region_code or not region_name:
+                return {
+                    'statusCode': 400,
+                    'body': json.dumps({'error': 'RegionType, RegionCode, and RegionName are required'})
+                }
+            
+            # Define PK, SK, and parent check based on RegionType
+            if region_type == 'STATE':
+                pk = f"STATE#{region_code}"
+                sk = f"STATE#{region_code}"
+                parent_check = None  # No parent for State
+            elif region_type == 'DISTRICT':
+                if not state_code:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'StateCode is required for DISTRICT'})
+                    }
+                pk = f"STATE#{state_code}"
+                sk = f"DISTRICT#{region_code}"
+                parent_check = {'PK': pk, 'SK': f"STATE#{state_code}"}
+            elif region_type == 'MANDAL':
+                if not state_code or not district_code:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'StateCode and DistrictCode are required for MANDAL'})
+                    }
+                pk = f"DISTRICT#{district_code}"
+                sk = f"MANDAL#{region_code}"
+                parent_check = {'PK': f"STATE#{state_code}", 'SK': f"DISTRICT#{district_code}"}
+            elif region_type == 'VILLAGE':
+                if not state_code or not district_code or not mandal_code:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'StateCode, DistrictCode, and MandalCode are required for VILLAGE'})
+                    }
+                pk = f"MANDAL#{mandal_code}"
+                sk = f"VILLAGE#{region_code}"
+                parent_check = {'PK': f"DISTRICT#{district_code}", 'SK': f"MANDAL#{mandal_code}"}
+            elif region_type == 'HABITATION':
+                if not state_code or not district_code or not mandal_code or not village_code:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'StateCode, DistrictCode, MandalCode, and VillageCode are required for HABITATION'})
+                    }
+                pk = f"VILLAGE#{village_code}"
+                sk = f"HABITATION#{region_code}"
+                parent_check = {'PK': f"MANDAL#{mandal_code}", 'SK': f"VILLAGE#{village_code}"}
+                if not path:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'Path is required for HABITATION'})
+                    }
+            else:
+                return {
+                    'statusCode': 400,
+                    'body': json.dumps({'error': 'Invalid RegionType. Must be STATE, DISTRICT, MANDAL, VILLAGE, or HABITATION'})
+                }
+        
+        # Check if parent exists (if applicable)
+        if parent_check:
+            try:
+                response = table.get_item(Key=parent_check)
+                if 'Item' not in response:
+                    return ErrorResponse.build(f"Parent record {parent_check['SK']} does not exist", 400)
+            except Exception as e:
+                    logger.error(f"Failed to validate parent: {e}")
+                    return ErrorResponse.build("Database error", 500)
+
+            # Audit logging
+            user = event.get("requestContext", {}).get("authorizer", {}).get("principalId", "admin")
             enable_audit = os.environ.get("ENABLE_AUDIT_LOG", "false").lower() == "true"
+
             try:
                 table.put_item(
                     Item=item,
-                    ConditionExpression="attribute_not_exists(region_id) AND attribute_not_exists(region_type_parent_id)"
+                    ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)"
                 )
                 if enable_audit:
                     logger.info(json.dumps({
@@ -233,54 +260,67 @@ def lambda_handler(event, context):
                         "error": str(e)
                     }))
                 return ErrorResponse.build("Database error", 500)
-            return SuccessResponse.build({"message": "created", "item": item})
+
+            return SuccessResponse.build({"message": "created", "item": transform_item_to_json(item)})
 
         if method == "GET":
             params = event.get("queryStringParameters") or event.get("pathParameters") or {}
-            # Validate region_id and region_type_parent_id
-            if validate_region_keys(params):
-                region_id = params.get("region_id")
-                region_type_parent_id = params.get("region_type_parent_id")
+            if validate_keys(params):
+                pk = params.get("PK")
+                sk = params.get("SK")
                 try:
-                    r = table.get_item(Key={"region_id": region_id, "region_type_parent_id": region_type_parent_id})
+                    r = table.get_item(Key={"PK": pk, "SK": sk})
+                    item = r.get("Item")
+                    if not item:
+                        return ErrorResponse.build("Item not found", 404)
+                    return SuccessResponse.build(transform_item_to_json(item))
                 except Exception as e:
                     logger.error(f"DynamoDB get_item failed: {e}")
                     return ErrorResponse.build("Database error", 500)
-                return SuccessResponse.build(transform_item_to_json(r.get("Item")))
-            # If no region_id/region_type_parent_id, return all states
-            try:
-                from boto3.dynamodb.conditions import Attr
-                response = table.scan(FilterExpression=Attr('region_type').eq('STATE'))
-                items = response.get('Items', [])
-            except Exception as e:
-                logger.error(f"DynamoDB scan failed: {e}")
-                return ErrorResponse.build("Database error", 500)
-            return SuccessResponse.build(items)
+            else:
+                try:
+                    # Default list: query items under a sample PK, using SK prefix for types
+                    response = table.query(
+                        KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                        ExpressionAttributeValues={":pk": "STATE#TS", ":sk": "STATE#"}
+                    )
+                    items = response.get("Items", [])
+                    return SuccessResponse.build([transform_item_to_json(item) for item in items])
+                except Exception as e:
+                    logger.error(f"DynamoDB query failed: {e}")
+                    return ErrorResponse.build("Database error", 500)
 
         if method == "PUT":
-            body = json.loads(event.get("body", "{}"))
+            try:
+                body = json.loads(event.get("body", "{}"))
+                logger.debug(f"Parsed body: {body}")
+            except Exception as e:
+                logger.error(f"Failed to parse body: {e}")
+                return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
+
             try:
                 RegionDetails.validate_for_type(body)
                 region = RegionDetails(**body)
             except (ValidationError, ValueError) as ve:
                 logger.warning(f"Schema validation failed: {ve}")
                 return ErrorResponse.build(f"Invalid region details: {ve}", 400)
+
             item = region.dict(exclude_none=True)
-            from datetime import datetime
             sysdate = datetime.utcnow().isoformat() + "Z"
             item["updated_date"] = sysdate
             if not item.get("created_by"):
                 item["created_by"] = "admin"
             item["updated_by"] = "admin"
-            import getpass
-            user = event.get("requestContext", {}).get("authorizer", {}).get("principalId") or getpass.getuser()
+
+            user = event.get("requestContext", {}).get("authorizer", {}).get("principalId", "admin")
             enable_audit = os.environ.get("ENABLE_AUDIT_LOG", "false").lower() == "true"
+
             try:
                 response = table.update_item(
-                    Key={"region_id": item["region_id"], "region_type_parent_id": item["region_type_parent_id"]},
-                    UpdateExpression="SET " + ", ".join(f"{k} = :{k}" for k in item if k not in ["region_id", "region_type_parent_id"]),
-                    ExpressionAttributeValues={f":{k}": v for k, v in item.items() if k not in ["region_id", "region_type_parent_id"]},
-                    ConditionExpression="attribute_exists(region_id) AND attribute_exists(region_type_parent_id)",
+                    Key={"PK": item["PK"], "SK": item["SK"]},
+                    UpdateExpression="SET " + ", ".join(f"{k} = :{k}" for k in item if k not in ["PK", "SK"]),
+                    ExpressionAttributeValues={f":{k}": v for k, v in item.items() if k not in ["PK", "SK"]},
+                    ConditionExpression="attribute_exists(PK) AND attribute_exists(SK)",
                     ReturnValues="ALL_NEW"
                 )
                 if enable_audit:
@@ -291,8 +331,9 @@ def lambda_handler(event, context):
                         "item": item,
                         "new_values": response.get("Attributes", {})
                     }))
+                return SuccessResponse.build({"message": "updated", "item": transform_item_to_json(item)})
             except Exception as e:
-                logger.error(f"DynamoDB put_item failed: {e}")
+                logger.error(f"DynamoDB update_item failed: {e}")
                 if enable_audit:
                     logger.info(json.dumps({
                         "action": "error",
@@ -302,29 +343,29 @@ def lambda_handler(event, context):
                         "error": str(e)
                     }))
                 return ErrorResponse.build("Database error", 500)
-            return SuccessResponse.build({"message": "updated", "item": item})
 
         if method == "DELETE":
             params = event.get("queryStringParameters") or {}
-            # Validate region_id and region_type_parent_id
-            if not validate_region_keys(params):
-                logger.warning("Missing or invalid region_id/region_type_parent_id in DELETE params")
-                return ErrorResponse.build("Missing or invalid region_id or region_type_parent_id for DELETE", 400)
-            region_id = params.get("region_id")
-            region_type_parent_id = params.get("region_type_parent_id")
-            import getpass
-            user = event.get("requestContext", {}).get("authorizer", {}).get("principalId") or getpass.getuser()
+            if not validate_keys(params):
+                logger.warning("Missing or invalid PK/SK in DELETE params")
+                return ErrorResponse.build("Missing or invalid PK or SK for DELETE", 400)
+
+            pk = params.get("PK")
+            sk = params.get("SK")
+            user = event.get("requestContext", {}).get("authorizer", {}).get("principalId", "admin")
             enable_audit = os.environ.get("ENABLE_AUDIT_LOG", "false").lower() == "true"
+
             try:
-                table.delete_item(Key={"region_id": region_id, "region_type_parent_id": region_type_parent_id})
+                table.delete_item(Key={"PK": pk, "SK": sk})
                 if enable_audit:
                     logger.info(json.dumps({
                         "action": "delete",
                         "user": user,
                         "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "region_id": region_id,
-                        "region_type_parent_id": region_type_parent_id
+                        "PK": pk,
+                        "SK": sk
                     }))
+                return SuccessResponse.build({"message": "deleted"})
             except Exception as e:
                 logger.error(f"DynamoDB delete_item failed: {e}")
                 if enable_audit:
@@ -332,15 +373,15 @@ def lambda_handler(event, context):
                         "action": "error",
                         "user": user,
                         "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "region_id": region_id,
-                        "region_type_parent_id": region_type_parent_id,
+                        "PK": pk,
+                        "SK": sk,
                         "error": str(e)
                     }))
                 return ErrorResponse.build("Database error", 500)
-            return SuccessResponse.build({"message": "deleted"})
 
         logger.warning(f"Unsupported method: {method}")
         return ErrorResponse.build("Unsupported method", 405)
+
     except Exception as e:
         logger.error(f"Unhandled exception: {e}")
         return ErrorResponse.build("Internal server error", 500)
