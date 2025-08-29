@@ -145,6 +145,7 @@ def lambda_handler(event, context):
             if not item.get("created_by"):
                 item["created_by"] = "admin"
             item["updated_by"] = "admin"
+
             # parent check
             region_type = item.get("RegionType")
             region_code = item.get("RegionCode")
@@ -212,16 +213,18 @@ def lambda_handler(event, context):
                     'statusCode': 400,
                     'body': json.dumps({'error': 'Invalid RegionType. Must be STATE, DISTRICT, MANDAL, VILLAGE, or HABITATION'})
                 }
-        
-        # Check if parent exists (if applicable)
-        if parent_check:
-            try:
-                response = table.get_item(Key=parent_check)
-                if 'Item' not in response:
-                    return ErrorResponse.build(f"Parent record {parent_check['SK']} does not exist", 400)
-            except Exception as e:
-                    logger.error(f"Failed to validate parent: {e}")
-                    return ErrorResponse.build("Database error", 500)
+
+            logger.info(f"Determined PK: {pk}, SK: {sk}, Parent Check: {parent_check}")
+
+            # Check if parent exists (if applicable)
+            if parent_check:
+                try:
+                    response = table.get_item(Key=parent_check)
+                    if 'Item' not in response:
+                        return ErrorResponse.build(f"Parent record {parent_check['SK']} does not exist", 400)
+                except Exception as e:
+                        logger.error(f"Failed to validate parent: {e}")
+                        return ErrorResponse.build("Database error", 500)
 
             # Audit logging
             user = event.get("requestContext", {}).get("authorizer", {}).get("principalId", "admin")
@@ -352,6 +355,7 @@ def lambda_handler(event, context):
 
             pk = params.get("PK")
             sk = params.get("SK")
+            
             user = event.get("requestContext", {}).get("authorizer", {}).get("principalId", "admin")
             enable_audit = os.environ.get("ENABLE_AUDIT_LOG", "false").lower() == "true"
 
