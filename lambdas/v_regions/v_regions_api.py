@@ -23,32 +23,46 @@ def validate_keys(params):
     sk = params.get("SK")
     return isinstance(pk, str) and isinstance(sk, str) and pk and sk
 
-# Transform item to JSON response
-def transform_item_to_json(item):
-    if not item:
-        return None
-    region_type = item.get("RegionType")
-    result = {
-        "id": item.get("PK").split("#")[-1] if "#" in item.get("PK", "") else item.get("PK"),
-        "type": region_type,
-        "code": item.get("RegionCode"),
-        "name": item.get("RegionName"),
-        "isActive": True,  # Assuming all items are active
-        "createdAt": item.get("created_date"),
-        "updatedAt": item.get("updated_date"),
-        "createdBy": item.get("created_by"),
-        "updatedBy": item.get("updated_by")
-    }
-    if region_type != "STATE":
-        result["stateCode"] = item.get("StateCode")
-    if region_type in ["MANDAL", "VILLAGE", "HABITATION"]:
-        result["districtCode"] = item.get("DistrictCode")
-    if region_type in ["VILLAGE", "HABITATION"]:
-        result["mandalCode"] = item.get("MandalCode")
-    if region_type == "HABITATION":
-        result["villageCode"] = item.get("VillageCode")
-        result["path"] = item.get("Path")
-    return result
+def transform_items_to_json(items):
+    """Transform a list of DynamoDB items to a list of JSON objects."""
+    if not items:
+        return []
+    
+    results = []
+    for item in items:
+        if not item or not isinstance(item, dict):
+            logger.warning(f"Skipping invalid item: {item}")
+            continue
+            
+        region_type = item.get("RegionType")
+        if not region_type:
+            logger.warning(f"Skipping item with missing RegionType: {item}")
+            continue
+
+        result = {
+            "id": item.get("PK").split("#")[-1] if "#" in item.get("PK", "") else item.get("PK"),
+            "type": region_type,
+            "code": item.get("RegionCode"),
+            "name": item.get("RegionName"),
+            "isActive": True,  # Assuming all items are active
+            "createdAt": item.get("created_date"),
+            "updatedAt": item.get("updated_date"),
+            "createdBy": item.get("created_by"),
+            "updatedBy": item.get("updated_by")
+        }
+        if region_type != "STATE":
+            result["stateCode"] = item.get("StateCode")
+        if region_type in ["MANDAL", "VILLAGE", "HABITATION"]:
+            result["districtCode"] = item.get("DistrictCode")
+        if region_type in ["VILLAGE", "HABITATION"]:
+            result["mandalCode"] = item.get("MandalCode")
+        if region_type == "HABITATION":
+            result["villageCode"] = item.get("VillageCode")
+            result["path"] = item.get("Path")
+        
+        results.append(result)
+    
+    return results
 
 # Pydantic model for validation
 class RegionDetails(BaseModel):
@@ -267,31 +281,138 @@ def lambda_handler(event, context):
             return SuccessResponse.build({"message": "created", "item": transform_item_to_json(item)})
 
         if method == "GET":
-            params = event.get("queryStringParameters") or event.get("pathParameters") or {}
-            if validate_keys(params):
-                pk = params.get("PK")
-                sk = params.get("SK")
-                try:
-                    r = table.get_item(Key={"PK": pk, "SK": sk})
-                    item = r.get("Item")
-                    if not item:
-                        return ErrorResponse.build("Item not found", 404)
-                    return SuccessResponse.build(transform_item_to_json(item))
-                except Exception as e:
-                    logger.error(f"DynamoDB get_item failed: {e}")
-                    return ErrorResponse.build("Database error", 500)
-            else:
-                try:
-                    # Default list: query items under a sample PK, using SK prefix for types
-                    response = table.query(
-                        KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
-                        ExpressionAttributeValues={":pk": "STATE#TS", ":sk": "STATE#"}
+            try:
+                # Extract query parameters
+                query_params = event.get("queryStringParameters") or event.get("pathParameters") or {}
+                region_type = query_params.get('regionType')
+                region_code = query_params.get('regionCode')
+
+                logger.info(f"Received request: regiontype={region_type}, regioncode={region_code}")
+
+                # Validate region_type
+                valid_region_types = ['STATE', 'DISTRICT', 'MANDAL', 'VILLAGE', 'HABITATION']
+                if not region_type:
+                    return ErrorResponse.build('Missing regiontype parameter', 400)
+                if region_type.upper() not in valid_region_types:
+                    return ErrorResponse.build(
+                        f'Invalid regiontype. Must be one of: {", ".join(valid_region_types)}',
+                        400
                     )
-                    items = response.get("Items", [])
-                    return SuccessResponse.build([transform_item_to_json(item) for item in items])
-                except Exception as e:
-                    logger.error(f"DynamoDB query failed: {e}")
-                    return ErrorResponse.build("Database error", 500)
+
+                region_type = region_type.upper()
+
+                # Initialize response items
+                items = []
+
+                if region_code:
+                    # Case: Filter by RegionCode (e.g., districts under a state)
+                    if region_type == 'STATE':
+                        return ErrorResponse.build(
+                            'RegionCode not applicable for STATE queries',
+                            400
+                        )
+
+                    # Define parent region for hierarchical queries
+                    parent_region = {
+                        'DISTRICT': 'STATE',
+                        'MANDAL': 'DISTRICT',
+                        'VILLAGE': 'MANDAL',
+                        'HABITATION': 'VILLAGE'
+                    }.get(region_type)
+
+                    if not parent_region:
+                        return ErrorResponse.build(
+                            f'No parent region defined for {region_type}',
+                            400
+                        )
+
+                    # Query DynamoDB with PK as parent region and SK starting with region_type
+                    logger.info(f"Querying PK={parent_region}#{region_code}, SK begins_with {region_type}#")
+                    response = table.query(
+                        KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
+                        ExpressionAttributeValues={
+                            ':pk': f'{parent_region}#{region_code}',
+                            ':sk': f'{region_type}#'
+                        }
+                    )
+                    items = response.get('Items', [])
+
+                    # Check if region_code exists (optional validation)
+                    if not items and region_type != 'STATE':
+                        logger.warning(f"No items found for {parent_region}#{region_code}")
+                        return ErrorResponse.build(
+                            f'No {region_type} found for {parent_region} with code {region_code}',
+                            404
+                        )
+
+                else:
+                    # Case: No RegionCode, return all items of the given RegionType
+                    logger.info(f"Scanning for RegionType={region_type}")
+                    response = table.scan(
+                        FilterExpression='RegionType = :rt',
+                        ExpressionAttributeValues={':rt': region_type}
+                    )
+                    items = response.get('Items', [])
+
+                    # Handle pagination
+                    while 'LastEvaluatedKey' in response:
+                        logger.info(f"Paginating scan with LastEvaluatedKey={response['LastEvaluatedKey']}")
+                        response = table.scan(
+                            FilterExpression='RegionType = :rt',
+                            ExpressionAttributeValues={':rt': region_type},
+                            ExclusiveStartKey=response['LastEvaluatedKey']
+                        )
+                        items.extend(response.get('Items', []))
+
+                # Prepare success response
+                # response_data = {
+                #     'count': len(items),
+                #     'items': items
+                # }
+                logger.info(f"Returning {len(items)} items for regiontype={region_type}")
+                return SuccessResponse.build(transform_items_to_json(items))
+
+            # except ClientError as e:
+            #     error_code = e.response['Error']['Code']
+            #     error_message = e.response['Error']['Message']
+            #     logger.error(f"DynamoDB ClientError: {error_code} - {error_message}")
+            #     if error_code == 'ResourceNotFoundException':
+            #         return create_error_response('DynamoDB table not found', 500)
+            #     elif error_code == 'ProvisionedThroughputExceededException':
+            #         return create_error_response('DynamoDB throughput exceeded, try again later', 429)
+            #     else:
+            #         return create_error_response(f'DynamoDB error: {error_message}', 500)
+
+            except Exception as e:
+                logger.error(f"Unexpected error: {str(e)}")
+                return ErrorResponse.build(f'Server error: {str(e)}', 500)
+
+
+            # params = event.get("queryStringParameters") or event.get("pathParameters") or {}
+            # if validate_keys(params):
+            #     pk = params.get("PK")
+            #     sk = params.get("SK")
+            #     try:
+            #         r = table.get_item(Key={"PK": pk, "SK": sk})
+            #         item = r.get("Item")
+            #         if not item:
+            #             return ErrorResponse.build("Item not found", 404)
+            #         return SuccessResponse.build(transform_item_to_json(item))
+            #     except Exception as e:
+            #         logger.error(f"DynamoDB get_item failed: {e}")
+            #         return ErrorResponse.build("Database error", 500)
+            # else:
+            #     try:
+            #         # Default list: query items under a sample PK, using SK prefix for types
+            #         response = table.query(
+            #             KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+            #             ExpressionAttributeValues={":pk": "STATE#TS", ":sk": "STATE#"}
+            #         )
+            #         items = response.get("Items", [])
+            #         return SuccessResponse.build([transform_item_to_json(item) for item in items])
+            #     except Exception as e:
+            #         logger.error(f"DynamoDB query failed: {e}")
+            #         return ErrorResponse.build("Database error", 500)
 
         if method == "PUT":
             try:
