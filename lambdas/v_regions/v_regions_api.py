@@ -3,6 +3,7 @@ import os
 import boto3
 import logging
 from datetime import datetime
+from decimal import Decimal
 import re
 from shared.response_utils import SuccessResponse, ErrorResponse
 from pydantic import BaseModel, ValidationError, Field
@@ -25,22 +26,29 @@ def validate_keys(params):
 
 def simplify(item):
     """
-    Simplify DynamoDB item format by extracting values from 'S', 'N', 'BOOL', 'M', or 'L' types.
+    Simplify DynamoDB item format by extracting values from 'S', 'N', 'BOOL', 'M', or 'L' types,
+    and handle Decimal objects for JSON serialization.
 
     Args:
-        item: Dictionary in DynamoDB format (e.g., {'PK': {'S': 'STATE#TS'}, 'isActive': {'BOOL': True}})
+        item: Dictionary in DynamoDB format (e.g., {'PK': {'S': 'STATE#TS'}}) or simplified format
 
     Returns:
         Simplified Python dictionary with native types (e.g., {'PK': 'STATE#TS', 'isActive': True})
     """
     out = {}
 
+    """Review this function for correctness and efficiency."""
     def simplify_value(v):
-        """Recursively simplify DynamoDB value types."""
+        """Recursively simplify DynamoDB value types and handle Decimal."""
+        if isinstance(v, Decimal):
+            # Convert Decimal to int if it's a whole number, else float
+            return int(v) if v == int(v) else float(v)
         if isinstance(v, dict):
+            logger.info(f"Simplifying dict value: {v}")
             if 'S' in v:
                 return v['S']
             elif 'N' in v:
+                # Convert numeric strings to int or float
                 return int(v['N']) if v['N'].isdigit() else float(v['N'])
             elif 'BOOL' in v:
                 return v['BOOL']
@@ -50,21 +58,29 @@ def simplify(item):
             elif 'L' in v:
                 # Simplify list of values
                 return [simplify_value(x) for x in v['L']]
+        elif isinstance(v, list):
+            return [simplify_value(x) for x in v]
+        elif isinstance(v, dict):
+            return {k: simplify_value(nv) for k, nv in v.items()}
         return v
 
+    logger.debug(f"Simplifying item: {item}")
     for k, v in item.items():
-        if k == 'metadata' and isinstance(v, dict) and 'M' in v:
+        if k == 'metadata':
             # Special handling for metadata to ensure population is int
-            metadata = {mk: simplify_value(mv) for mk, mv in v['M'].items()}
-            if 'population' in metadata:
+            metadata = simplify_value(v)
+            logger.info(f"Simplified metadata: {metadata}")
+            if isinstance(metadata, dict) and 'population' in metadata:
                 try:
                     metadata['population'] = int(metadata['population'])
-                except (ValueError, TypeError):
+                except (ValueError, TypeError) as e:
+                    logger.error(f"Invalid population in metadata: {metadata['population']} must be convertible to integer")
                     raise ValueError(f"Invalid population in metadata: {metadata['population']} must be convertible to integer")
             out[k] = metadata
         else:
             out[k] = simplify_value(v)
-
+    
+    logger.debug(f"Simplified item: {out}")
     return out
 
 def transform_items_to_json(items):
