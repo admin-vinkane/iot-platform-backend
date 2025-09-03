@@ -23,6 +23,50 @@ def validate_keys(params):
     sk = params.get("SK")
     return isinstance(pk, str) and isinstance(sk, str) and pk and sk
 
+def simplify(item):
+    """
+    Simplify DynamoDB item format by extracting values from 'S', 'N', 'BOOL', 'M', or 'L' types.
+
+    Args:
+        item: Dictionary in DynamoDB format (e.g., {'PK': {'S': 'STATE#TS'}, 'isActive': {'BOOL': True}})
+
+    Returns:
+        Simplified Python dictionary with native types (e.g., {'PK': 'STATE#TS', 'isActive': True})
+    """
+    out = {}
+
+    def simplify_value(v):
+        """Recursively simplify DynamoDB value types."""
+        if isinstance(v, dict):
+            if 'S' in v:
+                return v['S']
+            elif 'N' in v:
+                return int(v['N']) if v['N'].isdigit() else float(v['N'])
+            elif 'BOOL' in v:
+                return v['BOOL']
+            elif 'M' in v:
+                # Simplify nested map
+                return {k: simplify_value(nv) for k, nv in v['M'].items()}
+            elif 'L' in v:
+                # Simplify list of values
+                return [simplify_value(x) for x in v['L']]
+        return v
+
+    for k, v in item.items():
+        if k == 'metadata' and isinstance(v, dict) and 'M' in v:
+            # Special handling for metadata to ensure population is int
+            metadata = {mk: simplify_value(mv) for mk, mv in v['M'].items()}
+            if 'population' in metadata:
+                try:
+                    metadata['population'] = int(metadata['population'])
+                except (ValueError, TypeError):
+                    raise ValueError(f"Invalid population in metadata: {metadata['population']} must be convertible to integer")
+            out[k] = metadata
+        else:
+            out[k] = simplify_value(v)
+
+    return out
+
 def transform_items_to_json(items):
     """Transform a list of DynamoDB items to a list of JSON objects."""
     if not items:
@@ -30,13 +74,14 @@ def transform_items_to_json(items):
     
     results = []
     for item in items:
+        item = simplify(item)
         if not item or not isinstance(item, dict):
-            logger.warning(f"Skipping invalid item: {item}")
+            logger.info(f"Skipping invalid item: {item}")
             continue
             
         region_type = item.get("RegionType")
         if not region_type:
-            logger.warning(f"Skipping item with missing RegionType: {item}")
+            logger.info(f"Skipping item with missing RegionType: {item}")
             continue
 
         result = {
@@ -44,12 +89,21 @@ def transform_items_to_json(items):
             "type": region_type,
             "code": item.get("RegionCode"),
             "name": item.get("RegionName"),
-            "isActive": True,  # Assuming all items are active
+            "isActive": item.get("isActive", True),
             "createdAt": item.get("created_date"),
             "updatedAt": item.get("updated_date"),
             "createdBy": item.get("created_by"),
             "updatedBy": item.get("updated_by")
         }
+        logger.info(f"Transforming item: {item} to result: {result}")
+        # Explicitly add population and pincode for VILLAGE and HABITATION
+        if region_type in ["VILLAGE", "HABITATION"]:
+            metadata = item.get("metadata", {})
+            if isinstance(metadata, dict):
+                result["population"] = metadata.get("population")
+                result["pincode"] = metadata.get("pincode")
+        else:
+            result["metadata"] = item.get("metadata", {})
         if region_type != "STATE":
             result["stateCode"] = item.get("StateCode")
         if region_type in ["MANDAL", "VILLAGE", "HABITATION"]:
