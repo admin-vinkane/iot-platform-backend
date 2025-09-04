@@ -136,26 +136,8 @@ def transform_items_to_json(items):
 
 # Pydantic model for validation
 class RegionDetails(BaseModel):
-    @classmethod
-    def validate_for_type(cls, data):
-        region_type = data.get("RegionType")
-        required = []
-        if region_type == "STATE":
-            required = ["PK", "SK", "RegionType", "RegionCode", "RegionName"]
-        elif region_type == "DISTRICT":
-            required = ["PK", "SK", "RegionType", "RegionCode", "RegionName", "StateCode"]
-        elif region_type == "MANDAL":
-            required = ["PK", "SK", "RegionType", "RegionCode", "RegionName", "StateCode", "DistrictCode"]
-        elif region_type == "VILLAGE":
-            required = ["PK", "SK", "RegionType", "RegionCode", "RegionName", "StateCode", "DistrictCode", "MandalCode"]
-        elif region_type == "HABITATION":
-            required = ["PK", "SK", "RegionType", "RegionCode", "RegionName", "StateCode", "DistrictCode", "MandalCode", "VillageCode", "Path"]
-        missing = [f for f in required if not data.get(f)]
-        if missing:
-            raise ValueError(f"Missing required fields for {region_type}: {', '.join(missing)}")
-
-    PK: str = None
-    SK: str = None
+    # PK: str = None
+    # SK: str = None
     RegionType: str = None
     RegionCode: str = None
     RegionName: str = None
@@ -163,14 +145,68 @@ class RegionDetails(BaseModel):
     DistrictCode: str = None
     MandalCode: str = None
     VillageCode: str = None
-    Path: str = None
-    created_date: str = None
-    updated_date: str = None
+    # Path: str = None
+    # created_date: str = None
+    # updated_date: str = None
     created_by: str = None
     updated_by: str = None
+    isActive: bool = True
+    metadata: dict = {}
 
     class Config:
         extra = "forbid"
+
+    @classmethod
+    def validate_for_type(cls, data):
+        region_type = data.get("RegionType")
+        required = []
+        if region_type == "STATE":
+            required = [ "RegionType", "RegionCode", "RegionName", "isActive"]
+        elif region_type == "DISTRICT":
+            required = ["RegionType", "RegionCode", "RegionName", "StateCode", "isActive"]
+        elif region_type == "MANDAL":
+            required = ["RegionType", "RegionCode", "RegionName", "StateCode", "DistrictCode", "isActive"]
+        elif region_type == "VILLAGE":
+            required = ["RegionType", "RegionCode", "RegionName", "StateCode", "DistrictCode", "MandalCode", "isActive", "metadata"]
+        elif region_type == "HABITATION":
+            required = ["RegionType", "RegionCode", "RegionName", "StateCode", "DistrictCode", "MandalCode", "VillageCode", "isActive", "metadata"]
+        else:
+            raise ValueError(f"Invalid RegionType: {region_type}")
+
+        missing = [f for f in required if f not in data or data[f] is None]
+        if missing:
+            raise ValueError(f"Missing required fields for {region_type}: {', '.join(missing)}")
+
+        # Validate metadata based on RegionType
+        metadata = data.get("metadata", {})
+        if not isinstance(metadata, dict):
+            raise ValueError(f"metadata must be a dictionary for {region_type}, got {type(metadata)}")
+
+        if region_type in {"STATE", "DISTRICT", "MANDAL"}:
+            if metadata != {}:
+                raise ValueError(f"metadata for {region_type} must be empty, got {metadata}")
+        elif region_type == "VILLAGE":
+            # if "population" not in metadata:
+            #     raise ValueError(f"VILLAGE metadata must contain 'population', got {metadata}")
+            if "population" in metadata and (not isinstance(metadata["population"], int) or metadata["population"] < 0):
+                raise ValueError(f"VILLAGE population must be a non-negative integer, got {metadata['population']}")
+            # if "pincode" not in metadata:
+            #     raise ValueError(f"VILLAGE metadata must contain 'pincode', got {metadata}")
+            if "pincode" in metadata and (not isinstance(metadata["pincode"], str) or not re.match(r"^\d{6}$", metadata["pincode"])):
+                raise ValueError(f"VILLAGE pincode must be a 6-digit string, got {metadata['pincode']}")
+            allowed_keys = {"population", "pincode"}
+            if set(metadata.keys()) - allowed_keys:
+                raise ValueError(f"VILLAGE metadata contains unexpected keys: {set(metadata.keys()) - allowed_keys}")
+        elif region_type == "HABITATION":
+            # if "population" not in metadata:
+            #     raise ValueError(f"HABITATION metadata must contain 'population', got {metadata}")
+            if "population" in metadata and (not isinstance(metadata["population"], int) or metadata["population"] < 0):
+                raise ValueError(f"HABITATION population must be a non-negative integer, got {metadata['population']}")
+            # if "pincode" in metadata:
+            #     raise ValueError(f"HABITATION metadata must not contain 'pincode', got {metadata}")
+            allowed_keys = {"population"}
+            if set(metadata.keys()) - allowed_keys:
+                raise ValueError(f"HABITATION metadata contains unexpected keys: {set(metadata.keys()) - allowed_keys}")
 
     @classmethod
     def validate_pk_sk(cls, pk: str, sk: str) -> bool:
@@ -226,9 +262,55 @@ def lambda_handler(event, context):
                 else:
                     item[date_field] = sysdate
 
+            # Validate isActive
+            if not isinstance(item.get("isActive"), bool):
+                logger.error(f"Invalid isActive value: {item.get('isActive')} (must be boolean)")
+                return ErrorResponse.build(f"Invalid isActive value: {item.get('isActive')} (must be boolean)", 400)
+
+            # Validate metadata # possible duplicate validations
+            # metadata = item.get("metadata", {})
+            # if not isinstance(metadata, dict):
+            #     logger.error(f"Invalid metadata: must be a dictionary, got {type(metadata)}")
+            #     return ErrorResponse.build(f"Invalid metadata: must be a dictionary, got {type(metadata)}", 400)
+
+            # region_type = item.get("RegionType")
+            # if region_type in {"STATE", "DISTRICT", "MANDAL"}:
+            #     if metadata != {}:
+            #         logger.error(f"Metadata for {region_type} must be empty, got {metadata}")
+            #         return ErrorResponse.build(f"Metadata for {region_type} must be empty, got {metadata}", 400)
+
+            # elif region_type == "VILLAGE":
+            #     if not isinstance(metadata.get("population"), int) or metadata.get("population") < 0:
+            #         logger.error(f"Invalid population for VILLAGE: {metadata.get('population')} (must be non-negative integer)")
+            #         return ErrorResponse.build(f"Invalid population for VILLAGE: {metadata.get('population')} (must be non-negative integer)", 400)
+
+            #     if not isinstance(metadata.get("pincode"), str) or not re.match(r"^\d{6}$", metadata.get("pincode", "")):
+            #         logger.error(f"Invalid pincode for VILLAGE: {metadata.get('pincode')} (must be 6-digit string)")
+            #         return ErrorResponse.build(f"Invalid pincode for VILLAGE: {metadata.get('pincode')} (must be 6-digit string)", 400)
+
+            #     # Check for unexpected keys
+            #     allowed_keys = {"population", "pincode"}
+            #     if set(metadata.keys()) - allowed_keys:
+            #         logger.error(f"Unexpected keys in VILLAGE metadata: {set(metadata.keys()) - allowed_keys}")
+            #         return ErrorResponse.build(f"Unexpected keys in VILLAGE metadata: {set(metadata.keys()) - allowed_keys}", 400)
+
+            # elif region_type == "HABITATION":
+            #     if not isinstance(metadata.get("population"), int) or metadata.get("population") < 0:
+            #         logger.error(f"Invalid population for HABITATION: {metadata.get('population')} (must be non-negative integer)")
+            #         return ErrorResponse.build(f"Invalid population for HABITATION: {metadata.get('population')} (must be non-negative integer)", 400)
+
+            #     if "pincode" in metadata:
+            #         logger.error(f"HABITATION metadata must not contain pincode, got {metadata}")
+            #         return ErrorResponse.build(f"HABITATION metadata must not contain pincode, got {metadata}", 400)
+            #     # Check for unexpected keys
+            #     allowed_keys = {"population"}
+            #     if set(metadata.keys()) - allowed_keys:
+            #         return ErrorResponse.build(f"Unexpected keys in HABITATION metadata: {set(metadata.keys()) - allowed_keys}", 400)
+
             if not item.get("created_by"):
                 item["created_by"] = "admin"
-            item["updated_by"] = "admin"
+            if not item.get("updated_by"):
+                item["updated_by"] = "admin"
 
             # parent check
             region_type = item.get("RegionType")
@@ -238,7 +320,7 @@ def lambda_handler(event, context):
             district_code = item.get("DistrictCode")
             mandal_code = item.get("MandalCode")
             village_code = item.get("VillageCode")
-            path = item.get("Path")
+            # path = item.get("Path")
             # Validate required fields based on RegionType
             if not region_type or not region_code or not region_name:
                 return {
@@ -287,11 +369,12 @@ def lambda_handler(event, context):
                 pk = f"VILLAGE#{village_code}"
                 sk = f"HABITATION#{region_code}"
                 parent_check = {'PK': f"MANDAL#{mandal_code}", 'SK': f"VILLAGE#{village_code}"}
-                if not path:
-                    return {
-                        'statusCode': 400,
-                        'body': json.dumps({'error': 'Path is required for HABITATION'})
-                    }
+                # if not path:
+                #     return {
+                #         'statusCode': 400,
+                #         'body': json.dumps({'error': 'Path is required for HABITATION'})
+                #     }
+                path = f"{state_code}#{district_code}#{mandal_code}#{village_code}#{region_code}"
             else:
                 return {
                     'statusCode': 400,
@@ -313,6 +396,14 @@ def lambda_handler(event, context):
             # Audit logging
             user = event.get("requestContext", {}).get("authorizer", {}).get("principalId", "admin")
             enable_audit = os.environ.get("ENABLE_AUDIT_LOG", "false").lower() == "true"
+
+            # Finalize item with PK and SK
+            item["PK"] = pk
+            item["SK"] = sk
+            if region_type == "HABITATION":
+                item["Path"] = path
+
+            logger.info(f"Finalized item for insertion: {item}")
 
             try:
                 table.put_item(
@@ -348,7 +439,7 @@ def lambda_handler(event, context):
                     }))
                 return ErrorResponse.build("Database error", 500)
 
-            return SuccessResponse.build({"message": "created", "item": transform_item_to_json(item)})
+            return SuccessResponse.build({"message": "created", "item": transform_items_to_json([item])})
 
         if method == "GET":
             try:
