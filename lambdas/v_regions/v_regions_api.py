@@ -16,13 +16,21 @@ table = dynamodb.Table(TABLE_NAME)
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
-# Validate PK and SK
-def validate_keys(params):
+# Validate RegionType and RegionCode and ParentCode
+def validate_delete_keys(params):
     if not isinstance(params, dict):
         return False
-    pk = params.get("PK")
-    sk = params.get("SK")
-    return isinstance(pk, str) and isinstance(sk, str) and pk and sk
+    regiontype = params.get("RegionType")
+    regioncode = params.get("RegionCode")
+    parentcode = params.get("ParentCode")
+
+    if regiontype != 'STATE' and not (isinstance(parentcode, str) and parentcode):
+        return False
+
+    if not (isinstance(regiontype, str) and regiontype and isinstance(regioncode, str) and regioncode):
+        return False
+
+    return True
 
 def simplify(item):
     """
@@ -591,14 +599,117 @@ def lambda_handler(event, context):
                 return ErrorResponse.build(f"Invalid region details: {ve}", 400)
 
             item = region.dict(exclude_none=True)
+
+            allowed_types = {"STATE", "DISTRICT", "MANDAL", "VILLAGE", "HABITATION"}
+            if item.get("RegionType") not in allowed_types:
+                logger.error(f"Invalid Type: {item.get('RegionType')}")
+                return ErrorResponse.build(f"Invalid Type: {item.get('RegionType')}", 400)
+
+            # Validate code format
+            if not re.match(r"^[A-Z0-9_]{2,32}$", item.get("RegionCode", "")):
+                logger.error(f"Invalid code format: {item.get('RegionCode')}")
+                return ErrorResponse.build("Invalid code format", 400)
+
+            # Validate name length
+            if not isinstance(item.get("RegionName"), str) or len(item.get("RegionName")) > 128:
+                logger.error(f"Invalid or too long name: {item.get('RegionName')}")
+                return ErrorResponse.build("Invalid or too long name", 400)
+
+            # Validate dates
+            sysdate = datetime.utcnow().isoformat() + "Z"
+            for date_field in ("created_date", "updated_date"):
+                if item.get(date_field):
+                    try:
+                        datetime.fromisoformat(item[date_field].replace("Z", ""))
+                    except Exception:
+                        return ErrorResponse.build(f"Invalid date format for {date_field}", 400)
+                else:
+                    item[date_field] = sysdate
+
+            # Validate isActive
+            if not isinstance(item.get("isActive"), bool):
+                logger.error(f"Invalid isActive value: {item.get('isActive')} (must be boolean)")
+                return ErrorResponse.build(f"Invalid isActive value: {item.get('isActive')} (must be boolean)", 400)
+            
+
             sysdate = datetime.utcnow().isoformat() + "Z"
             item["updated_date"] = sysdate
             if not item.get("created_by"):
                 item["created_by"] = "admin"
-            item["updated_by"] = "admin"
+            if not item.get("updated_by"):
+                item["updated_by"] = "admin"
 
             user = event.get("requestContext", {}).get("authorizer", {}).get("principalId", "admin")
             enable_audit = os.environ.get("ENABLE_AUDIT_LOG", "false").lower() == "true"
+
+            # parent check
+            region_type = item.get("RegionType")
+            region_code = item.get("RegionCode")
+            region_name = item.get("RegionName")
+            state_code = item.get("StateCode")
+            district_code = item.get("DistrictCode")
+            mandal_code = item.get("MandalCode")
+            village_code = item.get("VillageCode")
+            # path = item.get("Path")
+            # Validate required fields based on RegionType
+            if not region_type or not region_code or not region_name:
+                return {
+                    'statusCode': 400,
+                    'body': json.dumps({'error': 'RegionType, RegionCode, and RegionName are required'})
+                }
+            
+            # Define PK, SK, and parent check based on RegionType
+            if region_type == 'STATE':
+                pk = f"STATE#{region_code}"
+                sk = f"STATE#{region_code}"
+
+            elif region_type == 'DISTRICT':
+                if not state_code:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'StateCode is required for DISTRICT'})
+                    }
+                pk = f"STATE#{state_code}"
+                sk = f"DISTRICT#{region_code}"
+
+            elif region_type == 'MANDAL':
+                if not state_code or not district_code:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'StateCode and DistrictCode are required for MANDAL'})
+                    }
+                pk = f"DISTRICT#{district_code}"
+                sk = f"MANDAL#{region_code}"
+
+            elif region_type == 'VILLAGE':
+                if not state_code or not district_code or not mandal_code:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'StateCode, DistrictCode, and MandalCode are required for VILLAGE'})
+                    }
+                pk = f"MANDAL#{mandal_code}"
+                sk = f"VILLAGE#{region_code}"
+
+            elif region_type == 'HABITATION':
+                if not state_code or not district_code or not mandal_code or not village_code:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'StateCode, DistrictCode, MandalCode, and VillageCode are required for HABITATION'})
+                    }
+                pk = f"VILLAGE#{village_code}"
+                sk = f"HABITATION#{region_code}"
+
+            else:
+                return {
+                    'statusCode': 400,
+                    'body': json.dumps({'error': 'Invalid RegionType. Must be STATE, DISTRICT, MANDAL, VILLAGE, or HABITATION'})
+                }
+
+            logger.info(f"Determined PK: {pk}, SK: {sk}")
+
+            # Finalize item with PK and SK
+            item["PK"] = pk
+            item["SK"] = sk
 
             try:
                 response = table.update_item(
@@ -608,6 +719,7 @@ def lambda_handler(event, context):
                     ConditionExpression="attribute_exists(PK) AND attribute_exists(SK)",
                     ReturnValues="ALL_NEW"
                 )
+
                 if enable_audit:
                     logger.info(json.dumps({
                         "action": "update",
@@ -616,7 +728,7 @@ def lambda_handler(event, context):
                         "item": item,
                         "new_values": response.get("Attributes", {})
                     }))
-                return SuccessResponse.build({"message": "updated", "item": transform_item_to_json(item)})
+                return SuccessResponse.build({"message": "updated", "item": transform_items_to_json([item])})
             except Exception as e:
                 logger.error(f"DynamoDB update_item failed: {e}")
                 if enable_audit:
@@ -631,15 +743,98 @@ def lambda_handler(event, context):
 
         if method == "DELETE":
             params = event.get("queryStringParameters") or {}
-            if not validate_keys(params):
-                logger.warning("Missing or invalid PK/SK in DELETE params")
-                return ErrorResponse.build("Missing or invalid PK or SK for DELETE", 400)
+            if not validate_delete_keys(params):
+                logger.warning("Missing ParentCode(excluding STATE) or invalid RegionType and RegionCode in DELETE params")
+                return ErrorResponse.build("Missing ParentCode(excluding STATE) or invalid RegionType and RegionCode for DELETE", 400)
 
-            pk = params.get("PK")
-            sk = params.get("SK")
+            region_type = params.get("RegionType")
+            region_code = params.get("RegionCode")
+            parent_code = params.get("ParentCode")
             
+
+            # Define PK, SK, and parent check based on RegionType
+            if region_type == 'STATE':
+                pk = f"STATE#{region_code}"
+                sk = f"STATE#{region_code}"
+
+            elif region_type == 'DISTRICT':
+                state_code = parent_code
+                if not state_code:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'StateCode is required for DISTRICT'})
+                    }
+                pk = f"STATE#{state_code}"
+                sk = f"DISTRICT#{region_code}"
+
+            elif region_type == 'MANDAL':
+                district_code = parent_code
+                if not district_code:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'DistrictCode is required for MANDAL'})
+                    }
+                pk = f"DISTRICT#{district_code}"
+                sk = f"MANDAL#{region_code}"
+
+            elif region_type == 'VILLAGE':
+                mandal_code = parent_code
+                if not mandal_code:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'MandalCode is required for VILLAGE'})
+                    }
+                pk = f"MANDAL#{mandal_code}"
+                sk = f"VILLAGE#{region_code}"
+
+            elif region_type == 'HABITATION':
+                village_code = parent_code
+                if not village_code:
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({'error': 'VillageCode is required for HABITATION'})
+                    }
+                pk = f"VILLAGE#{village_code}"
+                sk = f"HABITATION#{region_code}"
+
+            else:
+                return {
+                    'statusCode': 400,
+                    'body': json.dumps({'error': 'Invalid RegionType. Must be STATE, DISTRICT, MANDAL, VILLAGE, or HABITATION'})
+                }
+
+
             user = event.get("requestContext", {}).get("authorizer", {}).get("principalId", "admin")
             enable_audit = os.environ.get("ENABLE_AUDIT_LOG", "false").lower() == "true"
+
+            logger.info(f"Determined PK: {pk}, SK: {sk} for deletion")
+
+            # Check for child items before deleting
+            child_type_map = {
+                "STATE": "DISTRICT",
+                "DISTRICT": "MANDAL",
+                "MANDAL": "VILLAGE",
+                "VILLAGE": "HABITATION"
+            }
+            child_type = child_type_map.get(region_type)
+            logger.info(f"Checking for child items of type: {child_type}")
+            if child_type:
+                try:
+                    response = table.query(
+                        KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
+                        ExpressionAttributeValues={
+                            ':pk': sk, # looking for child items under this sk
+                            ':sk': f'{child_type}#'
+                        }
+                    )
+                    children = response.get('Items', [])
+                    logger.info(f"Found {children} child items")
+                    if children:
+                        logger.warning(f"Cannot delete {region_type} {pk}/{sk}: child {child_type} exists.")
+                        return ErrorResponse.build(f"Cannot delete: child {child_type} exists for this region.", 409)
+                except Exception as e:
+                    logger.error(f"Error checking for child items: {e}")
+                    return ErrorResponse.build("Database error while checking for child items", 500)
 
             try:
                 table.delete_item(Key={"PK": pk, "SK": sk})
