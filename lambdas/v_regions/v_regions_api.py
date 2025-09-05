@@ -16,13 +16,13 @@ table = dynamodb.Table(TABLE_NAME)
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
-# Validate RegionType and RegionCode and ParentCode
+# Validate regionType and regionCode and parentCode
 def validate_delete_keys(params):
     if not isinstance(params, dict):
         return False
-    regiontype = params.get("RegionType")
-    regioncode = params.get("RegionCode")
-    parentcode = params.get("ParentCode")
+    regiontype = params.get("regionType")
+    regioncode = params.get("regionCode")
+    parentcode = params.get("parentCode")
 
     if regiontype != 'STATE' and not (isinstance(parentcode, str) and parentcode):
         return False
@@ -747,9 +747,9 @@ def lambda_handler(event, context):
                 logger.warning("Missing ParentCode(excluding STATE) or invalid RegionType and RegionCode in DELETE params")
                 return ErrorResponse.build("Missing ParentCode(excluding STATE) or invalid RegionType and RegionCode for DELETE", 400)
 
-            region_type = params.get("RegionType")
-            region_code = params.get("RegionCode")
-            parent_code = params.get("ParentCode")
+            region_type = params.get("regionType")
+            region_code = params.get("regionCode")
+            parent_code = params.get("parentCode")
             
 
             # Define PK, SK, and parent check based on RegionType
