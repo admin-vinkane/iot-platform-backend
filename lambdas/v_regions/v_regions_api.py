@@ -742,7 +742,7 @@ def lambda_handler(event, context):
                 return ErrorResponse.build("Database error", 500)
 
         if method == "DELETE":
-            params = event.get("queryStringParameters") or {}
+            params = event.get("queryStringParameters") or event.get("pathParameters") or {}
             if not validate_delete_keys(params):
                 logger.warning("Missing ParentCode(excluding STATE) or invalid RegionType and RegionCode in DELETE params")
                 return ErrorResponse.build("Missing ParentCode(excluding STATE) or invalid RegionType and RegionCode for DELETE", 400)

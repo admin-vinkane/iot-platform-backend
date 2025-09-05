@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Usage: ./scripts/package_and_upload_lambda.sh <lambda_dir> --env dev|prod [--upload]
+# Run from parent directory ./scripts/package_and_upload_lambda.sh lambdas/v_regions --env dev --upload
 # Packages a single lambda, zips it, and optionally uploads to S3 (Linux compatible, auto-handles Docker, AWS CLI, and credentials)
 
 
