@@ -86,7 +86,7 @@ def lambda_handler(event, context):
                     return build_response(False, error="Database error")
                 return build_response(True, data=items)
 
-            elif method == "POST":
+    elif method == "POST":
                 try:
                     body = json.loads(event.get("body", "{}"))
                 except Exception as e:
@@ -160,7 +160,7 @@ def lambda_handler(event, context):
                     return build_response(False, error="Database error")
                 return build_response(True, data={"message": "created", "item": db_item})
 
-            elif method == "GET":
+    elif method == "GET":
                 params = event.get("queryStringParameters") or event.get("pathParameters") or {}
                 if not validate_pk_sk(params):
                     logger.warning("Missing or invalid PK/SK in GET params")
@@ -178,7 +178,7 @@ def lambda_handler(event, context):
                 else:
                     return build_response(False, error="Item not found or deleted")
 
-            elif method == "PUT":
+    elif method == "PUT":
                 try:
                     body = json.loads(event.get("body", "{}"))
                 except Exception as e:
@@ -231,7 +231,7 @@ def lambda_handler(event, context):
                     return build_response(False, error="Database error")
                 return build_response(True, data={"message": "updated", "item": db_item})
 
-            elif method == "DELETE":
+    elif method == "DELETE":
                 params = event.get("queryStringParameters") or {}
                 if not validate_pk_sk(params):
                     logger.warning("Missing or invalid PK/SK in DELETE params")
@@ -259,6 +259,6 @@ def lambda_handler(event, context):
                     return build_response(False, error="Database error")
                 return build_response(True, data={"message": "deleted"})
 
-            else:
-                logger.warning(f"Unsupported method: {method}")
-                return build_response(False, error="Unsupported method")
+    else:
+        logger.warning(f"Unsupported method: {method}")
+        return build_response(False, error="Unsupported method")
