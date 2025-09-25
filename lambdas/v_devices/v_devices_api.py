@@ -4,9 +4,28 @@ import boto3
 import logging
 from datetime import datetime
 from decimal import Decimal
+import decimal
 from pydantic import BaseModel, ValidationError, Field
-from shared.response_utils import SuccessResponse, ErrorResponse
+from botocore.exceptions import ClientError
 
+# Placeholder for SuccessResponse and ErrorResponse
+class SuccessResponse:
+    @staticmethod
+    def build(data, status_code=200):
+        return {
+            "statusCode": status_code,
+            "body": json.dumps(data),
+            "headers": {"Content-Type": "application/json"}
+        }
+
+class ErrorResponse:
+    @staticmethod
+    def build(message, status_code):
+        return {
+            "statusCode": status_code,
+            "body": json.dumps({"error": message}),
+            "headers": {"Content-Type": "application/json"}
+        }
 
 TABLE_NAME = os.environ.get("TABLE_NAME", "v_devices_dev")
 dynamodb = boto3.resource("dynamodb")
@@ -24,9 +43,9 @@ class DeviceMeta(BaseModel):
     SerialNumber: str
     Status: str
     Location: str
-    # CreatedDate: str
-    # UpdatedDate: str
     EntityType: str
+    CreatedDate: str = None
+    UpdatedDate: str = None
 
     class Config:
         extra = "forbid"
@@ -39,9 +58,9 @@ class DeviceConfig(BaseModel):
     ConfigData: dict
     AppliedBy: str
     Status: str
-    # CreatedDate: str
-    # UpdatedDate: str
     EntityType: str
+    CreatedDate: str = None
+    UpdatedDate: str = None
 
     class Config:
         extra = "forbid"
@@ -52,15 +71,16 @@ class DeviceRepair(BaseModel):
     DeviceId: str
     RepairId: str
     Description: str
-    Cost: float
+    Cost: Decimal = Field(ge=0)
     Technician: str
     Status: str
-    # CreatedDate: str
-    # UpdatedDate: str
     EntityType: str
+    CreatedDate: str = None
+    UpdatedDate: str = None
 
     class Config:
         extra = "forbid"
+        arbitrary_types_allowed = True
 
 class DeviceInstall(BaseModel):
     PK: str
@@ -72,9 +92,9 @@ class DeviceInstall(BaseModel):
     Notes: str
     Status: str
     Warranty: str
-    # CreatedDate: str
-    # UpdatedDate: str
     EntityType: str
+    CreatedDate: str = None
+    UpdatedDate: str = None
 
     class Config:
         extra = "forbid"
@@ -86,11 +106,11 @@ class DeviceRuntime(BaseModel):
     Metrics: dict
     Events: list
     Status: str
-    # CreatedDate: str
-    # UpdatedDate: str
     EntityType: str
     EventDate: str = None
     ttl: int = None
+    CreatedDate: str = None
+    UpdatedDate: str = None
 
     class Config:
         extra = "forbid"
@@ -102,15 +122,16 @@ class SimMeta(BaseModel):
     MobileNumber: str
     Provider: str
     Plan: str
-    DataUsage: int
+    DataUsage: Decimal = Field(ge=0)
     AssignedDeviceId: str
     Status: str
-    # CreatedDate: str
-    # UpdatedDate: str
     EntityType: str
+    CreatedDate: str = None
+    UpdatedDate: str = None
 
     class Config:
         extra = "forbid"
+        arbitrary_types_allowed = True
 
 class SimAssoc(BaseModel):
     PK: str
@@ -119,9 +140,9 @@ class SimAssoc(BaseModel):
     SIMId: str
     Provider: str
     Status: str
-    # CreatedDate: str
-    # UpdatedDate: str
     EntityType: str
+    CreatedDate: str = None
+    UpdatedDate: str = None
 
     class Config:
         extra = "forbid"
@@ -143,6 +164,7 @@ def lambda_handler(event, context):
             item = json.loads(event.get("body", "{}"))
             if not isinstance(item, dict):
                 raise ValueError("POST body must be a dict")
+            item = convert_floats_to_decimal(item)
         except Exception as e:
             logger.error(f"Failed to parse body: {e}")
             return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
@@ -152,7 +174,6 @@ def lambda_handler(event, context):
         if not model:
             return ErrorResponse.build(f"Unknown EntityType: {entity_type}", 400)
 
-        # Derive PK and SK if not present
         if entity_type == "DEVICE":
             item["PK"] = f'DEVICE#{item.get("DeviceId")}'
             item["SK"] = "META"
@@ -190,14 +211,26 @@ def lambda_handler(event, context):
         except ValidationError as ve:
             return ErrorResponse.build(str(ve), 400)
 
-        # Always initialize CreatedDate and UpdatedDate to sysdate, even if fields don't exist
         now_iso = datetime.utcnow().isoformat() + "Z"
         item["CreatedDate"] = now_iso
         item["UpdatedDate"] = now_iso
 
+        validated_dict = convert_floats_to_decimal(validated.dict())
+
         try:
-            table.put_item(Item=validated.dict())
-            return SuccessResponse.build({"inserted": validated.dict()})
+            table.put_item(Item=validated_dict)
+            simplified_dict = simplify(validated_dict)
+            return SuccessResponse.build({"inserted": simplified_dict})
+        except TypeError as e:
+            if "is not JSON serializable" in str(e):
+                logger.error(f"JSON serialization error: {str(e)}")
+                return ErrorResponse.build("Response contains non-serializable types", 500)
+            raise
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            error_msg = e.response["Error"]["Message"]
+            logger.error(f"DynamoDB ClientError: {error_code} - {error_msg}")
+            return ErrorResponse.build(f"DynamoDB error: {error_code} - {error_msg}", 500)
         except Exception as e:
             logger.error(f"DynamoDB error: {str(e)}")
             return ErrorResponse.build(f"DynamoDB error: {str(e)}", 500)
@@ -207,7 +240,6 @@ def lambda_handler(event, context):
         device_type = params.get("DeviceType")
         status = params.get("Status")
 
-        # Scan for all devices by default
         filter_expression = []
         expression_values = {}
 
@@ -239,12 +271,43 @@ def lambda_handler(event, context):
                 )
 
             items = response.get("Items", [])
+            for item in items:
+                device_id = item.get("DeviceId")
+                if device_id:
+                    try:
+                        repair_response = table.query(
+                            KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                            ExpressionAttributeValues={
+                                ":pk": f"DEVICE#{device_id}",
+                                ":sk": "REPAIR#"
+                            }
+                        )
+                        repair_items = [simplify(r) for r in repair_response.get("Items", [])]
+                        logger.info(f"***** repair_items: {repair_items}")
+                        item["RepairHistory"] = repair_items
+                    except Exception as e:
+                        logger.error(f"Error fetching repair history for {device_id}: {str(e)}")
+                        item["RepairHistory"] = []
             return SuccessResponse.build(transform_items_to_json(items))
         except Exception as e:
             logger.error(f"DynamoDB scan error: {str(e)}")
             return ErrorResponse.build(f"DynamoDB scan error: {str(e)}", 500)
 
     return ErrorResponse.build("Method not allowed", 405)
+
+def convert_floats_to_decimal(obj):
+    """
+    Recursively convert all float values in a dict or list to decimal.Decimal.
+    """
+    if isinstance(obj, float):
+        logger.debug(f"Converting float to Decimal: {obj}")
+        return decimal.Decimal(str(obj))
+    elif isinstance(obj, dict):
+        return {k: convert_floats_to_decimal(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_floats_to_decimal(v) for v in obj]
+    else:
+        return obj
 
 def simplify(item):
     """
@@ -266,10 +329,10 @@ def transform_items_to_json(items):
     """Transform a list of DynamoDB items to a list of JSON objects for devices."""
     if not items:
         return []
-    
+
     results = []
     for item in items:
-        item = simplify(item)  # <-- Add this line to convert Decimals
+        item = simplify(item)
         if not item or not isinstance(item, dict):
             continue
 
@@ -288,10 +351,10 @@ def transform_items_to_json(items):
             "currentLocation": item.get("Location"),
             "createdAt": item.get("CreatedDate"),
             "updatedAt": item.get("UpdatedDate"),
+            "RepairHistory": item.get("RepairHistory"),
             "PK": item.get("PK"),
             "SK": item.get("SK")
         }
-        # Add extra fields for other entity types
         if entity_type == "CONFIG":
             result["configVersion"] = item.get("ConfigVersion")
             result["configData"] = item.get("ConfigData")
@@ -321,7 +384,7 @@ def transform_items_to_json(items):
         elif entity_type == "SIM_ASSOC":
             result["simId"] = item.get("SIMId")
             result["provider"] = item.get("Provider")
-        
+
         results.append(result)
-    
+
     return results
