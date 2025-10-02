@@ -174,67 +174,42 @@ def lambda_handler(event, context):
         if not model:
             return ErrorResponse.build(f"Unknown EntityType: {entity_type}", 400)
 
-        if entity_type == "DEVICE":
-            item["PK"] = f'DEVICE#{item.get("DeviceId")}'
-            item["SK"] = "META"
-        elif entity_type == "CONFIG":
-            item["PK"] = f'DEVICE#{item.get("DeviceId")}'
-            version = item.get("ConfigVersion", "V1.0")
-            created = item.get("CreatedDate", datetime.utcnow().isoformat() + "Z")
-            item["SK"] = f'CONFIG#{version}#{created}'
-        elif entity_type == "REPAIR":
-            item["PK"] = f'DEVICE#{item.get("DeviceId")}'
-            repair_id = item.get("RepairId", "REP")
-            created = item.get("CreatedDate", datetime.utcnow().isoformat() + "Z")
-            item["SK"] = f'REPAIR#{repair_id}#{created[:10]}'
-        elif entity_type == "INSTALL":
-            item["PK"] = f'DEVICE#{item.get("DeviceId")}'
-            install_id = item.get("InstallId", "INS")
-            created = item.get("CreatedDate", datetime.utcnow().isoformat() + "Z")
-            item["SK"] = f'INSTALL#{install_id}#{created[:10]}'
-        elif entity_type == "RUNTIME":
-            item["PK"] = f'DEVICE#{item.get("DeviceId")}'
-            event_date = item.get("EventDate", datetime.utcnow().isoformat() + "Z")
-            item["SK"] = f'RUNTIME#{event_date}'
-        elif entity_type == "SIM":
-            item["PK"] = f'SIM#{item.get("SIMId")}'
-            item["SK"] = "META"
-        elif entity_type == "SIM_ASSOC":
-            item["PK"] = f'DEVICE#{item.get("DeviceId")}'
-            sim_id = item.get("SIMId", "SIM")
-            item["SK"] = f'SIM_ASSOC#{sim_id}'
-        else:
-            return ErrorResponse.build(f"Cannot derive PK/SK for EntityType: {entity_type}", 400)
+        # Derive PK and SK
+        pk, sk = derive_pk_sk(item)
+        if not pk or not sk:
+            return ErrorResponse.build("Could not derive PK/SK for update", 400)
+
+        # Remove PK and SK from update fields
+        update_fields = {k: v for k, v in item.items() if k not in ["PK", "SK"]}
+
+        # Build UpdateExpression and ExpressionAttributeValues
+        reserved_keywords = {"Status", "Location"}  # <-- Add Location here
+        update_expr_parts = []
+        expr_attr_names = {}
+        expr_attr_vals = {}
+
+        for k, v in update_fields.items():
+            if k in reserved_keywords:
+                update_expr_parts.append(f"#attr_{k} = :{k}")
+                expr_attr_names[f"#attr_{k}"] = k
+            else:
+                update_expr_parts.append(f"{k} = :{k}")
+            expr_attr_vals[f":{k}"] = v
+
+        update_expr = "SET " + ", ".join(update_expr_parts)
 
         try:
-            validated = model(**item)
-        except ValidationError as ve:
-            return ErrorResponse.build(str(ve), 400)
-
-        now_iso = datetime.utcnow().isoformat() + "Z"
-        item["CreatedDate"] = now_iso
-        item["UpdatedDate"] = now_iso
-
-        validated_dict = convert_floats_to_decimal(validated.dict())
-
-        try:
-            table.put_item(Item=validated_dict)
-            simplified_dict = simplify(validated_dict)
-            return SuccessResponse.build({"inserted": simplified_dict})
-        except TypeError as e:
-            if "is not JSON serializable" in str(e):
-                logger.error(f"JSON serialization error: {str(e)}")
-                return ErrorResponse.build("Response contains non-serializable types", 500)
-            raise
-        except ClientError as e:
-            error_code = e.response["Error"]["Code"]
-            error_msg = e.response["Error"]["Message"]
-            logger.error(f"DynamoDB ClientError: {error_code} - {error_msg}")
-            return ErrorResponse.build(f"DynamoDB error: {error_code} - {error_msg}", 500)
+            table.update_item(
+                Key={"PK": pk, "SK": sk},
+                UpdateExpression=update_expr,
+                ExpressionAttributeValues=expr_attr_vals,
+                ExpressionAttributeNames=expr_attr_names if expr_attr_names else None,
+                ReturnValues="ALL_NEW"
+            )
+            return SuccessResponse.build({"updated": item})
         except Exception as e:
-            logger.error(f"DynamoDB error: {str(e)}")
-            return ErrorResponse.build(f"DynamoDB error: {str(e)}", 500)
-
+            logger.error(f"Update error: {str(e)}")
+            return ErrorResponse.build(f"Update error: {str(e)}", 500)
     elif method == "GET":
         params = event.get("queryStringParameters") or {}
         device_type = params.get("DeviceType")
@@ -294,20 +269,77 @@ def lambda_handler(event, context):
             logger.error(f"DynamoDB scan error: {str(e)}")
             return ErrorResponse.build(f"DynamoDB scan error: {str(e)}", 500)
 
+    elif method == "PUT":
+        try:
+            item = json.loads(event.get("body", "{}"))
+            if not isinstance(item, dict):
+                raise ValueError("PUT body must be a dict")
+            item = convert_floats_to_decimal(item)
+        except Exception as e:
+            logger.error(f"Failed to parse body: {e}")
+            return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
+
+        entity_type = item.get("EntityType")
+        model = ENTITY_MODEL_MAP.get(entity_type)
+        if not model:
+            return ErrorResponse.build(f"Unknown EntityType: {entity_type}", 400)
+
+        # Derive PK and SK
+        pk, sk = derive_pk_sk(item)
+        if not pk or not sk:
+            return ErrorResponse.build("Could not derive PK/SK for update", 400)
+
+        # Remove PK and SK from update fields
+        update_fields = {k: v for k, v in item.items() if k not in ["PK", "SK"]}
+
+        # Build UpdateExpression and ExpressionAttributeValues
+        reserved_keywords = {"Status", "Location"}  # <-- Add Location here
+        update_expr_parts = []
+        expr_attr_names = {}
+        expr_attr_vals = {}
+
+        for k, v in update_fields.items():
+            if k in reserved_keywords:
+                update_expr_parts.append(f"#attr_{k} = :{k}")
+                expr_attr_names[f"#attr_{k}"] = k
+            else:
+                update_expr_parts.append(f"{k} = :{k}")
+            expr_attr_vals[f":{k}"] = v
+
+        update_expr = "SET " + ", ".join(update_expr_parts)
+
+        try:
+            table.update_item(
+                Key={"PK": pk, "SK": sk},
+                UpdateExpression=update_expr,
+                ExpressionAttributeValues=expr_attr_vals,
+                ExpressionAttributeNames=expr_attr_names if expr_attr_names else None,
+                ReturnValues="ALL_NEW"
+            )
+            return SuccessResponse.build({"updated": item})
+        except Exception as e:
+            logger.error(f"Update error: {str(e)}")
+            return ErrorResponse.build(f"Update error: {str(e)}", 500)
+        
     elif method == "DELETE":
         params = event.get("queryStringParameters") or {}
-        device_id = params.get("DeviceId")
-        if not device_id:
-            return ErrorResponse.build("DeviceId is required for delete", 400)
-        pk = f"DEVICE#{device_id}"
+        entity_type = params.get("EntityType")
+        if not entity_type:
+            return ErrorResponse.build("EntityType is required for delete", 400)
+
+        # Build item dict from query params for PK/SK derivation
+        item = {k: v for k, v in params.items()}
+        pk, sk = derive_pk_sk(item)
+        if not pk or not sk:
+            return ErrorResponse.build("Could not derive PK/SK for delete", 400)
         try:
             table.delete_item(
                 Key={
                     "PK": pk,
-                    "SK": "META"
+                    "SK": sk
                 }
             )
-            return SuccessResponse.build({"deleted": device_id})
+            return SuccessResponse.build({"deleted": {"PK": pk, "SK": sk}})
         except Exception as e:
             logger.error(f"Delete error: {str(e)}")
             return ErrorResponse.build(f"Delete error: {str(e)}", 500)
@@ -415,3 +447,42 @@ def transform_items_to_json(items):
         results.append(result)
 
     return results
+
+def derive_pk_sk(item):
+    """
+    Derive PK and SK values based on EntityType and other fields.
+    """
+    entity_type = item.get("EntityType")
+    if entity_type == "DEVICE":
+        pk = f'DEVICE#{item.get("DeviceId")}'
+        sk = "META"
+    elif entity_type == "CONFIG":
+        pk = f'DEVICE#{item.get("DeviceId")}'
+        version = item.get("ConfigVersion", "V1.0")
+        created = item.get("CreatedDate", datetime.utcnow().isoformat() + "Z")
+        sk = f'CONFIG#{version}#{created}'
+    elif entity_type == "REPAIR":
+        pk = f'DEVICE#{item.get("DeviceId")}'
+        repair_id = item.get("RepairId", "REP")
+        created = item.get("CreatedDate", datetime.utcnow().isoformat() + "Z")
+        sk = f'REPAIR#{repair_id}#{created[:10]}'
+    elif entity_type == "INSTALL":
+        pk = f'DEVICE#{item.get("DeviceId")}'
+        install_id = item.get("InstallId", "INS")
+        created = item.get("CreatedDate", datetime.utcnow().isoformat() + "Z")
+        sk = f'INSTALL#{install_id}#{created[:10]}'
+    elif entity_type == "RUNTIME":
+        pk = f'DEVICE#{item.get("DeviceId")}'
+        event_date = item.get("EventDate", datetime.utcnow().isoformat() + "Z")
+        sk = f'RUNTIME#{event_date}'
+    elif entity_type == "SIM":
+        pk = f'SIM#{item.get("SIMId")}'
+        sk = "META"
+    elif entity_type == "SIM_ASSOC":
+        pk = f'DEVICE#{item.get("DeviceId")}'
+        sim_id = item.get("SIMId", "SIM")
+        sk = f'SIM_ASSOC#{sim_id}'
+    else:
+        pk = None
+        sk = None
+    return pk, sk
