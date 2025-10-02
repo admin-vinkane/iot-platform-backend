@@ -288,10 +288,29 @@ def lambda_handler(event, context):
                     except Exception as e:
                         logger.error(f"Error fetching repair history for {device_id}: {str(e)}")
                         item["RepairHistory"] = []
+            
             return SuccessResponse.build(transform_items_to_json(items))
         except Exception as e:
             logger.error(f"DynamoDB scan error: {str(e)}")
             return ErrorResponse.build(f"DynamoDB scan error: {str(e)}", 500)
+
+    elif method == "DELETE":
+        params = event.get("queryStringParameters") or {}
+        device_id = params.get("DeviceId")
+        if not device_id:
+            return ErrorResponse.build("DeviceId is required for delete", 400)
+        pk = f"DEVICE#{device_id}"
+        try:
+            table.delete_item(
+                Key={
+                    "PK": pk,
+                    "SK": "META"
+                }
+            )
+            return SuccessResponse.build({"deleted": device_id})
+        except Exception as e:
+            logger.error(f"Delete error: {str(e)}")
+            return ErrorResponse.build(f"Delete error: {str(e)}", 500)
 
     return ErrorResponse.build("Method not allowed", 405)
 
@@ -330,6 +349,13 @@ def transform_items_to_json(items):
     if not items:
         return []
 
+    # Build a lookup for InstallId by DeviceId
+    install_lookup = {}
+    for item in items:
+        item = simplify(item)
+        if item.get("EntityType") == "INSTALL" and item.get("DeviceId") and item.get("InstallId"):
+            install_lookup[item["DeviceId"]] = item["InstallId"]
+
     results = []
     for item in items:
         item = simplify(item)
@@ -352,6 +378,7 @@ def transform_items_to_json(items):
             "createdAt": item.get("CreatedDate"),
             "updatedAt": item.get("UpdatedDate"),
             "RepairHistory": item.get("RepairHistory"),
+            "InstallId": install_lookup.get(item.get("DeviceId")),  # <-- Add InstallId here
             "PK": item.get("PK"),
             "SK": item.get("SK")
         }
