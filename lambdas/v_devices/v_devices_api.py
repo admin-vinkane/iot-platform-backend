@@ -210,6 +210,7 @@ def lambda_handler(event, context):
         except Exception as e:
             logger.error(f"Update error: {str(e)}")
             return ErrorResponse.build(f"Update error: {str(e)}", 500)
+    
     elif method == "GET":
         params = event.get("queryStringParameters") or {}
         device_type = params.get("DeviceType")
