@@ -3,6 +3,18 @@
 # Packages all lambdas in lambdas/ to dist/<lambda>.zip
 # If --upload is provided, uploads to S3 as well
 
+# Usage
+# 1. Package All Lambdas - ./scripts/package_and_upload_all_lambdas.sh
+# Packages all Lambda functions into .zip files in the dist directory.
+# 2. Package and Upload to S3 - ./scripts/package_and_upload_all_lambdas.sh --upload
+# Packages all Lambda functions and uploads them to the my-lambda-bucket-vinkane-dev S3 bucket.
+# 3. Specify a Custom Bucket - ./scripts/package_and_upload_all_lambdas.sh --upload --bucket my-custom-bucket
+# Packages and uploads Lambda functions to the specified S3 bucket.
+# Conclusion
+# The package_and_upload_all_lambdas.sh script automates the process of packaging, uploading, and managing Lambda functions.
+# It ensures compatibility with AWS Lambda's environment, dynamically determines the S3 bucket based on the environment,
+# and updates Terraform .tfvars files for seamless deployment. This script is a critical part of the CI/CD pipeline for
+# managing Lambda functions in the project.
 
 set -e
 
