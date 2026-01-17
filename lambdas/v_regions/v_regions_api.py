@@ -222,9 +222,30 @@ class RegionDetails(BaseModel):
 
 # Lambda handler
 def lambda_handler(event, context):
-    logger.info(f"Received event: {json.dumps(event)}")
-    method = event.get("httpMethod") or event.get("requestContext", {}).get("http", {}).get("method")
-    logger.debug(f"HTTP method: {method}")
+    logger.info(f"Received event: {json.dumps(event, default=str)}")
+    
+    # Try multiple ways to extract the HTTP method
+    method = (
+        event.get("httpMethod") or 
+        event.get("requestContext", {}).get("http", {}).get("method") or
+        event.get("requestContext", {}).get("httpMethod")
+    )
+    
+    # Log for debugging
+    logger.info(f"Event keys: {list(event.keys())}")
+    logger.info(f"Extracted method: {method}")
+    
+    # If method is still None, return detailed error
+    if not method:
+        logger.error("Could not extract HTTP method from event")
+        return ErrorResponse.build("Could not determine HTTP method from request", 400)
+
+    # Handle OPTIONS preflight request for CORS
+    if method == "OPTIONS":
+        return SuccessResponse.build({"message": "CORS preflight successful"}, 200)
+    
+    path = event.get("path", "")
+    query_params = event.get("queryStringParameters") or {}
 
     try:
         if method == "POST":

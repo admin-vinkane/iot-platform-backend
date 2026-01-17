@@ -127,30 +127,351 @@ def simplify(item):
 
 # Lambda handler
 def lambda_handler(event, context):
-    logger.info(f"Received event: {json.dumps(event)}")
-    method = event.get("httpMethod")
-    path = event.get("path")
+    logger.info(f"Received event: {json.dumps(event, default=str)}")
+    
+    # Try multiple ways to extract the HTTP method
+    method = (
+        event.get("httpMethod") or 
+        event.get("requestContext", {}).get("http", {}).get("method") or
+        event.get("requestContext", {}).get("httpMethod")
+    )
+    
+    # Extract path (HTTP API 2.0 uses rawPath, REST API uses path)
+    path = event.get("path") or event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path")
     path_parameters = event.get("pathParameters", {})
     query_parameters = event.get("queryStringParameters", {})
+    
+    # Log for debugging
+    logger.info(f"Event keys: {list(event.keys())}")
+    logger.info(f"Extracted method: {method}")
+    logger.info(f"Extracted path: {path}")
+    
+    # If method is still None, return detailed error
+    if not method:
+        logger.error("Could not extract HTTP method from event")
+        return ErrorResponse.build("Could not determine HTTP method from request", 400)
+
+    # Handle OPTIONS preflight request for CORS
+    if method == "OPTIONS":
+        return SuccessResponse.build({"message": "CORS preflight successful"}, 200)
 
     try:
         if method == "GET":
-            if path == "/customers":
-                # Handle GET /customers
+            logger.info(f"GET request - path: '{path}', params: {path_parameters}")
+            
+            # GET /customers - List all customers
+            if path in ["/customers", "/dev/customers"]:
                 response = table.scan()
                 items = response.get("Items", [])
-                return SuccessResponse.build([simplify(item) for item in items])
-
-            elif path.startswith("/customers/") and "id" in path_parameters:
-                # Handle GET /customers/{id}
+                # Filter only customer entities
+                customers = [simplify(item) for item in items if item.get("SK") == "ENTITY#CUSTOMER"]
+                return SuccessResponse.build(customers)
+            
+            # GET /customers/{id}/contacts - List all contacts for a customer
+            elif "id" in path_parameters and "/contacts" in path and "contactId" not in path_parameters:
                 customer_id = path_parameters["id"]
                 pk = f"CUSTOMER#{customer_id}"
-                sk = "ENTITY#CUSTOMER"
+                
+                response = table.query(
+                    KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                    ExpressionAttributeValues={
+                        ":pk": pk,
+                        ":sk": "ENTITY#CONTACT#"
+                    }
+                )
+                contacts = [simplify(item) for item in response.get("Items", [])]
+                return SuccessResponse.build(contacts)
+            
+            # GET /customers/{id}/contacts/{contactId} - Get specific contact
+            elif "id" in path_parameters and "contactId" in path_parameters:
+                customer_id = path_parameters["id"]
+                contact_id = path_parameters["contactId"]
+                pk = f"CUSTOMER#{customer_id}"
+                sk = f"ENTITY#CONTACT#{contact_id}"
+                
                 response = table.get_item(Key={"PK": pk, "SK": sk})
                 item = response.get("Item")
                 if not item:
-                    return ErrorResponse.build("Customer not found", 404)
+                    return ErrorResponse.build("Contact not found", 404)
                 return SuccessResponse.build(simplify(item))
+            
+            # GET /customers/{id}/addresses - List all addresses for a customer
+            elif "id" in path_parameters and "/addresses" in path and "addressId" not in path_parameters:
+                customer_id = path_parameters["id"]
+                pk = f"CUSTOMER#{customer_id}"
+                
+                response = table.query(
+                    KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                    ExpressionAttributeValues={
+                        ":pk": pk,
+                        ":sk": "ENTITY#ADDRESS#"
+                    }
+                )
+                addresses = [simplify(item) for item in response.get("Items", [])]
+                return SuccessResponse.build(addresses)
+            
+            # GET /customers/{id}/addresses/{addressId} - Get specific address
+            elif "id" in path_parameters and "addressId" in path_parameters:
+                customer_id = path_parameters["id"]
+                address_id = path_parameters["addressId"]
+                pk = f"CUSTOMER#{customer_id}"
+                sk = f"ENTITY#ADDRESS#{address_id}"
+                
+                response = table.get_item(Key={"PK": pk, "SK": sk})
+                item = response.get("Item")
+                if not item:
+                    return ErrorResponse.build("Address not found", 404)
+                return SuccessResponse.build(simplify(item))
+            
+            # GET /customers/{id} - Get customer with nested contacts and addresses
+            elif "id" in path_parameters:
+                customer_id = path_parameters["id"]
+                pk = f"CUSTOMER#{customer_id}"
+                
+                # Query all items for this customer
+                response = table.query(
+                    KeyConditionExpression="PK = :pk",
+                    ExpressionAttributeValues={":pk": pk}
+                )
+                
+                items = response.get("Items", [])
+                if not items:
+                    return ErrorResponse.build("Customer not found", 404)
+                
+                # Separate items by entity type
+                customer = None
+                contacts = []
+                addresses = []
+                
+                for item in items:
+                    sk = item.get("SK", "")
+                    if sk == "ENTITY#CUSTOMER":
+                        customer = simplify(item)
+                    elif sk.startswith("ENTITY#CONTACT#"):
+                        contacts.append(simplify(item))
+                    elif sk.startswith("ENTITY#ADDRESS#"):
+                        addresses.append(simplify(item))
+                
+                if not customer:
+                    return ErrorResponse.build("Customer not found", 404)
+                
+                # Add nested data
+                customer["contacts"] = contacts
+                customer["addresses"] = addresses
+                return SuccessResponse.build(customer)
+        
+        elif method == "POST":
+            body = event.get("body")
+            if not body:
+                return ErrorResponse.build("Missing request body", 400)
+            
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                return ErrorResponse.build("Invalid JSON", 400)
+            
+            # POST /customers/{id}/contacts - Create contact
+            if "id" in path_parameters and "/contacts" in path:
+                customer_id = path_parameters["id"]
+                pk = f"CUSTOMER#{customer_id}"
+                
+                # Validate customer exists
+                check = table.get_item(Key={"PK": pk, "SK": "ENTITY#CUSTOMER"})
+                if "Item" not in check:
+                    return ErrorResponse.build("Customer not found", 404)
+                
+                try:
+                    contact = ContactDetails(**data)
+                except ValidationError as e:
+                    return ErrorResponse.build(f"Validation error: {str(e)}", 400)
+                
+                item = contact.dict()
+                try:
+                    table.put_item(
+                        Item=item,
+                        ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)"
+                    )
+                except Exception as e:
+                    if "ConditionalCheckFailedException" in str(e):
+                        logger.warning(f"Duplicate contact detected: {item.get('SK')}")
+                        return ErrorResponse.build(f"Contact {item.get('SK')} already exists", 409)
+                    logger.error(f"DynamoDB error: {str(e)}")
+                    raise
+                return SuccessResponse.build(simplify(item), status_code=201)
+            
+            # POST /customers/{id}/addresses - Create address
+            elif "id" in path_parameters and "/addresses" in path:
+                customer_id = path_parameters["id"]
+                pk = f"CUSTOMER#{customer_id}"
+                
+                # Validate customer exists
+                check = table.get_item(Key={"PK": pk, "SK": "ENTITY#CUSTOMER"})
+                if "Item" not in check:
+                    return ErrorResponse.build("Customer not found", 404)
+                
+                try:
+                    address = AddressDetails(**data)
+                except ValidationError as e:
+                    return ErrorResponse.build(f"Validation error: {str(e)}", 400)
+                
+                item = address.dict()
+                try:
+                    table.put_item(
+                        Item=item,
+                        ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)"
+                    )
+                except Exception as e:
+                    if "ConditionalCheckFailedException" in str(e):
+                        logger.warning(f"Duplicate address detected: {item.get('SK')}")
+                        return ErrorResponse.build(f"Address {item.get('SK')} already exists", 409)
+                    logger.error(f"DynamoDB error: {str(e)}")
+                    raise
+                return SuccessResponse.build(simplify(item), status_code=201)
+            
+            # POST /customers - Create customer
+            else:
+                try:
+                    customer = CustomerDetails(**data)
+                except ValidationError as e:
+                    return ErrorResponse.build(f"Validation error: {str(e)}", 400)
+                
+                item = customer.dict()
+                try:
+                    table.put_item(
+                        Item=item,
+                        ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)"
+                    )
+                except Exception as e:
+                    if "ConditionalCheckFailedException" in str(e):
+                        logger.warning(f"Duplicate customer detected: {item.get('PK')}")
+                        return ErrorResponse.build(f"Customer {item.get('PK')} already exists", 409)
+                    logger.error(f"DynamoDB error: {str(e)}")
+                    raise
+                return SuccessResponse.build(simplify(item), status_code=201)
+        
+        elif method == "PUT":
+            body = event.get("body")
+            if not body:
+                return ErrorResponse.build("Missing request body", 400)
+            
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                return ErrorResponse.build("Invalid JSON", 400)
+            
+            # PUT /customers/{id}/contacts/{contactId} - Update contact
+            if "id" in path_parameters and "contactId" in path_parameters:
+                customer_id = path_parameters["id"]
+                contact_id = path_parameters["contactId"]
+                pk = f"CUSTOMER#{customer_id}"
+                sk = f"ENTITY#CONTACT#{contact_id}"
+                
+                # Check if exists
+                check = table.get_item(Key={"PK": pk, "SK": sk})
+                if "Item" not in check:
+                    return ErrorResponse.build("Contact not found", 404)
+                
+                try:
+                    contact = ContactDetails(**data)
+                except ValidationError as e:
+                    return ErrorResponse.build(f"Validation error: {str(e)}", 400)
+                
+                item = contact.dict()
+                table.put_item(Item=item)
+                return SuccessResponse.build(simplify(item))
+            
+            # PUT /customers/{id}/addresses/{addressId} - Update address
+            elif "id" in path_parameters and "addressId" in path_parameters:
+                customer_id = path_parameters["id"]
+                address_id = path_parameters["addressId"]
+                pk = f"CUSTOMER#{customer_id}"
+                sk = f"ENTITY#ADDRESS#{address_id}"
+                
+                # Check if exists
+                check = table.get_item(Key={"PK": pk, "SK": sk})
+                if "Item" not in check:
+                    return ErrorResponse.build("Address not found", 404)
+                
+                try:
+                    address = AddressDetails(**data)
+                except ValidationError as e:
+                    return ErrorResponse.build(f"Validation error: {str(e)}", 400)
+                
+                item = address.dict()
+                table.put_item(Item=item)
+                return SuccessResponse.build(simplify(item))
+            
+            # PUT /customers/{id} - Update customer
+            elif "id" in path_parameters:
+                customer_id = path_parameters["id"]
+                pk = f"CUSTOMER#{customer_id}"
+                sk = "ENTITY#CUSTOMER"
+                
+                # Check if exists
+                check = table.get_item(Key={"PK": pk, "SK": sk})
+                if "Item" not in check:
+                    return ErrorResponse.build("Customer not found", 404)
+                
+                try:
+                    customer = CustomerDetails(**data)
+                except ValidationError as e:
+                    return ErrorResponse.build(f"Validation error: {str(e)}", 400)
+                
+                item = customer.dict()
+                table.put_item(Item=item)
+                return SuccessResponse.build(simplify(item))
+        
+        elif method == "DELETE":
+            # DELETE /customers/{id}/contacts/{contactId} - Delete contact
+            if "id" in path_parameters and "contactId" in path_parameters:
+                customer_id = path_parameters["id"]
+                contact_id = path_parameters["contactId"]
+                pk = f"CUSTOMER#{customer_id}"
+                sk = f"ENTITY#CONTACT#{contact_id}"
+                
+                # Check if exists
+                check = table.get_item(Key={"PK": pk, "SK": sk})
+                if "Item" not in check:
+                    return ErrorResponse.build("Contact not found", 404)
+                
+                table.delete_item(Key={"PK": pk, "SK": sk})
+                return SuccessResponse.build({"message": "Contact deleted"})
+            
+            # DELETE /customers/{id}/addresses/{addressId} - Delete address
+            elif "id" in path_parameters and "addressId" in path_parameters:
+                customer_id = path_parameters["id"]
+                address_id = path_parameters["addressId"]
+                pk = f"CUSTOMER#{customer_id}"
+                sk = f"ENTITY#ADDRESS#{address_id}"
+                
+                # Check if exists
+                check = table.get_item(Key={"PK": pk, "SK": sk})
+                if "Item" not in check:
+                    return ErrorResponse.build("Address not found", 404)
+                
+                table.delete_item(Key={"PK": pk, "SK": sk})
+                return SuccessResponse.build({"message": "Address deleted"})
+            
+            # DELETE /customers/{id} - Delete customer and all related data
+            elif "id" in path_parameters:
+                customer_id = path_parameters["id"]
+                pk = f"CUSTOMER#{customer_id}"
+                
+                # Query all items for this customer
+                response = table.query(
+                    KeyConditionExpression="PK = :pk",
+                    ExpressionAttributeValues={":pk": pk}
+                )
+                
+                items = response.get("Items", [])
+                if not items:
+                    return ErrorResponse.build("Customer not found", 404)
+                
+                # Delete all items
+                for item in items:
+                    table.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+                
+                return SuccessResponse.build({"message": "Customer and all related data deleted"})
 
         return ErrorResponse.build("Unsupported method", 405)
 

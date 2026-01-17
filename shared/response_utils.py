@@ -23,10 +23,7 @@ import json
 
 def build_response(status_code, body=None, headers=None):
     base_headers = {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, GET, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+        "Content-Type": "application/json"
     }
     if headers:
         base_headers.update(headers)

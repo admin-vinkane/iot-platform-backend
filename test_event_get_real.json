@@ -1,0 +1,10 @@
+{
+  "httpMethod": "GET",
+  "path": "/dev/devices",
+  "pathParameters": null,
+  "queryStringParameters": null,
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": null
+}
