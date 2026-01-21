@@ -36,6 +36,8 @@ class SimCardDetails(BaseModel):
     linkedDeviceId: str | None = None
     createdAt: str | None = None
     updatedAt: str | None = None
+    createdBy: str | None = None
+    updatedBy: str | None = None
 
     class Config:
         extra = "forbid"
@@ -136,6 +138,16 @@ def lambda_handler(event, context):
             item = sim.dict()
             item["PK"] = pk
             item["SK"] = sk
+            
+            # Set timestamps and by fields
+            from datetime import datetime
+            timestamp = datetime.utcnow().isoformat() + "Z"
+            if not item.get("createdAt"):
+                item["createdAt"] = timestamp
+            if not item.get("updatedAt"):
+                item["updatedAt"] = timestamp
+            if item.get("createdBy") and not item.get("updatedBy"):
+                item["updatedBy"] = item["createdBy"]
 
             table.put_item(Item=item)
             return build_response(simplify(item), 201)
@@ -165,6 +177,12 @@ def lambda_handler(event, context):
             item = sim.dict()
             item["PK"] = pk
             item["SK"] = sk
+            
+            # Set updatedAt and updatedBy
+            from datetime import datetime
+            item["updatedAt"] = datetime.utcnow().isoformat() + "Z"
+            if item.get("createdBy") and not item.get("updatedBy"):
+                item["updatedBy"] = item["createdBy"]
 
             table.put_item(Item=item)
             return build_response(simplify(item))

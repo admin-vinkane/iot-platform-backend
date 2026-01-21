@@ -2,6 +2,8 @@ import json
 import os
 import boto3
 import logging
+import uuid
+from datetime import datetime
 from decimal import Decimal
 from shared.response_utils import SuccessResponse, ErrorResponse
 from pydantic import BaseModel, ValidationError
@@ -19,6 +21,8 @@ class CustomerDetails(BaseModel):
     PK: str
     SK: str
     entityType: str
+    customerId: str = None  # Auto-generated ID
+    customerNumber: str = None  # User-provided customer number
     name: str = None
     companyName: str = None
     email: str = None
@@ -31,14 +35,17 @@ class CustomerDetails(BaseModel):
     isActive: bool = True
     createdAt: str = None
     createdBy: str = None
+    updatedAt: str = None
+    updatedBy: str = None
 
     class Config:
         extra = "forbid"
 
 class ContactDetails(BaseModel):
-    PK: str
-    SK: str
+    PK: str = None
+    SK: str = None
     entityType: str
+    contactId: str = None  # Auto-generated ID
     firstName: str
     lastName: str
     displayName: str
@@ -47,18 +54,21 @@ class ContactDetails(BaseModel):
     countryCode: str
     contactType: str
     createAsUser: bool
-    userId: str
+    userId: str | None = None
     isActive: bool
-    createdAt: str
+    createdAt: str = None
     createdBy: str
+    updatedAt: str = None
+    updatedBy: str = None
 
     class Config:
         extra = "forbid"
 
 class AddressDetails(BaseModel):
-    PK: str
-    SK: str
+    PK: str = None
+    SK: str = None
     entityType: str
+    addressId: str = None  # Auto-generated ID
     addressType: str
     addressLine1: str
     addressLine2: str = None
@@ -68,8 +78,10 @@ class AddressDetails(BaseModel):
     country: str
     isActive: bool
     isPrimary: bool
-    createdAt: str
+    createdAt: str = None
     createdBy: str
+    updatedAt: str = None
+    updatedBy: str = None
 
     class Config:
         extra = "forbid"
@@ -280,6 +292,19 @@ def lambda_handler(event, context):
                 if "Item" not in check:
                     return ErrorResponse.build("Customer not found", 404)
                 
+                # Generate contact ID
+                contact_id = f"CONT{str(uuid.uuid4())[:8].upper()}"
+                
+                # Set PK, SK, contactId, and timestamp
+                data["PK"] = pk
+                data["SK"] = f"ENTITY#CONTACT#{contact_id}"
+                data["contactId"] = contact_id
+                timestamp = datetime.utcnow().isoformat()
+                data["createdAt"] = timestamp
+                data["updatedAt"] = timestamp
+                if "createdBy" in data:
+                    data["updatedBy"] = data["createdBy"]
+                
                 try:
                     contact = ContactDetails(**data)
                 except ValidationError as e:
@@ -293,8 +318,8 @@ def lambda_handler(event, context):
                     )
                 except Exception as e:
                     if "ConditionalCheckFailedException" in str(e):
-                        logger.warning(f"Duplicate contact detected: {item.get('SK')}")
-                        return ErrorResponse.build(f"Contact {item.get('SK')} already exists", 409)
+                        logger.warning(f"Duplicate contact detected: {contact_id}")
+                        return ErrorResponse.build(f"Contact {contact_id} already exists", 409)
                     logger.error(f"DynamoDB error: {str(e)}")
                     raise
                 return SuccessResponse.build(simplify(item), status_code=201)
@@ -309,6 +334,19 @@ def lambda_handler(event, context):
                 if "Item" not in check:
                     return ErrorResponse.build("Customer not found", 404)
                 
+                # Generate address ID
+                address_id = f"ADDR{str(uuid.uuid4())[:8].upper()}"
+                
+                # Set PK, SK, addressId, and timestamp
+                data["PK"] = pk
+                data["SK"] = f"ENTITY#ADDRESS#{address_id}"
+                data["addressId"] = address_id
+                timestamp = datetime.utcnow().isoformat()
+                data["createdAt"] = timestamp
+                data["updatedAt"] = timestamp
+                if "createdBy" in data:
+                    data["updatedBy"] = data["createdBy"]
+                
                 try:
                     address = AddressDetails(**data)
                 except ValidationError as e:
@@ -322,16 +360,34 @@ def lambda_handler(event, context):
                     )
                 except Exception as e:
                     if "ConditionalCheckFailedException" in str(e):
-                        logger.warning(f"Duplicate address detected: {item.get('SK')}")
-                        return ErrorResponse.build(f"Address {item.get('SK')} already exists", 409)
+                        logger.warning(f"Duplicate address detected: {address_id}")
+                        return ErrorResponse.build(f"Address {address_id} already exists", 409)
                     logger.error(f"DynamoDB error: {str(e)}")
                     raise
                 return SuccessResponse.build(simplify(item), status_code=201)
             
             # POST /customers - Create customer
             else:
+                # Generate customer ID if not provided
+                customer_id = f"CUST{str(uuid.uuid4())[:8].upper()}"
+                
+                # Prepare customer data
+                customer_data = data.copy()
+                customer_data["PK"] = f"CUSTOMER#{customer_id}"
+                customer_data["SK"] = "ENTITY#CUSTOMER"
+                customer_data["customerId"] = customer_id
+                customer_data["entityType"] = "customer"
+                
+                # Set timestamps
+                timestamp = datetime.utcnow().isoformat() + "Z"
+                if not customer_data.get("createdAt"):
+                    customer_data["createdAt"] = timestamp
+                customer_data["updatedAt"] = timestamp
+                if "createdBy" in customer_data:
+                    customer_data["updatedBy"] = customer_data["createdBy"]
+                
                 try:
-                    customer = CustomerDetails(**data)
+                    customer = CustomerDetails(**customer_data)
                 except ValidationError as e:
                     return ErrorResponse.build(f"Validation error: {str(e)}", 400)
                 
@@ -344,9 +400,11 @@ def lambda_handler(event, context):
                 except Exception as e:
                     if "ConditionalCheckFailedException" in str(e):
                         logger.warning(f"Duplicate customer detected: {item.get('PK')}")
-                        return ErrorResponse.build(f"Customer {item.get('PK')} already exists", 409)
+                        return ErrorResponse.build(f"Customer {customer_id} already exists", 409)
                     logger.error(f"DynamoDB error: {str(e)}")
                     raise
+                
+                logger.info(f"Created customer with ID: {customer_id}")
                 return SuccessResponse.build(simplify(item), status_code=201)
         
         elif method == "PUT":
@@ -371,6 +429,11 @@ def lambda_handler(event, context):
                 if "Item" not in check:
                     return ErrorResponse.build("Contact not found", 404)
                 
+                # Set updatedAt and updatedBy
+                data["updatedAt"] = datetime.utcnow().isoformat()
+                if "createdBy" in data:
+                    data["updatedBy"] = data["createdBy"]
+                
                 try:
                     contact = ContactDetails(**data)
                 except ValidationError as e:
@@ -392,6 +455,11 @@ def lambda_handler(event, context):
                 if "Item" not in check:
                     return ErrorResponse.build("Address not found", 404)
                 
+                # Set updatedAt and updatedBy
+                data["updatedAt"] = datetime.utcnow().isoformat()
+                if "createdBy" in data:
+                    data["updatedBy"] = data["createdBy"]
+                
                 try:
                     address = AddressDetails(**data)
                 except ValidationError as e:
@@ -412,6 +480,11 @@ def lambda_handler(event, context):
                 if "Item" not in check:
                     return ErrorResponse.build("Customer not found", 404)
                 
+                # Set updatedAt and updatedBy
+                data["updatedAt"] = datetime.utcnow().isoformat()
+                if "createdBy" in data:
+                    data["updatedBy"] = data["createdBy"]
+                
                 try:
                     customer = CustomerDetails(**data)
                 except ValidationError as e:
@@ -422,6 +495,9 @@ def lambda_handler(event, context):
                 return SuccessResponse.build(simplify(item))
         
         elif method == "DELETE":
+            # Check for soft delete parameter
+            soft_delete = query_parameters.get("soft") == "true" if query_parameters else False
+            
             # DELETE /customers/{id}/contacts/{contactId} - Delete contact
             if "id" in path_parameters and "contactId" in path_parameters:
                 customer_id = path_parameters["id"]
@@ -434,8 +510,19 @@ def lambda_handler(event, context):
                 if "Item" not in check:
                     return ErrorResponse.build("Contact not found", 404)
                 
-                table.delete_item(Key={"PK": pk, "SK": sk})
-                return SuccessResponse.build({"message": "Contact deleted"})
+                if soft_delete:
+                    # Soft delete - mark as inactive
+                    existing_item = check["Item"]
+                    existing_item["isActive"] = False
+                    existing_item["updatedAt"] = datetime.utcnow().isoformat()
+                    if "updatedBy" in query_parameters:
+                        existing_item["updatedBy"] = query_parameters["updatedBy"]
+                    table.put_item(Item=existing_item)
+                    return SuccessResponse.build({"message": "Contact soft deleted", "data": simplify(existing_item)})
+                else:
+                    # Hard delete
+                    table.delete_item(Key={"PK": pk, "SK": sk})
+                    return SuccessResponse.build({"message": "Contact deleted"})
             
             # DELETE /customers/{id}/addresses/{addressId} - Delete address
             elif "id" in path_parameters and "addressId" in path_parameters:
@@ -449,8 +536,19 @@ def lambda_handler(event, context):
                 if "Item" not in check:
                     return ErrorResponse.build("Address not found", 404)
                 
-                table.delete_item(Key={"PK": pk, "SK": sk})
-                return SuccessResponse.build({"message": "Address deleted"})
+                if soft_delete:
+                    # Soft delete - mark as inactive
+                    existing_item = check["Item"]
+                    existing_item["isActive"] = False
+                    existing_item["updatedAt"] = datetime.utcnow().isoformat()
+                    if "updatedBy" in query_parameters:
+                        existing_item["updatedBy"] = query_parameters["updatedBy"]
+                    table.put_item(Item=existing_item)
+                    return SuccessResponse.build({"message": "Address soft deleted", "data": simplify(existing_item)})
+                else:
+                    # Hard delete
+                    table.delete_item(Key={"PK": pk, "SK": sk})
+                    return SuccessResponse.build({"message": "Address deleted"})
             
             # DELETE /customers/{id} - Delete customer and all related data
             elif "id" in path_parameters:
@@ -467,11 +565,25 @@ def lambda_handler(event, context):
                 if not items:
                     return ErrorResponse.build("Customer not found", 404)
                 
-                # Delete all items
-                for item in items:
-                    table.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
-                
-                return SuccessResponse.build({"message": "Customer and all related data deleted"})
+                if soft_delete:
+                    # Soft delete - mark all items as inactive
+                    timestamp = datetime.utcnow().isoformat()
+                    updated_by = query_parameters.get("updatedBy") if query_parameters else None
+                    
+                    for item in items:
+                        item["isActive"] = False
+                        item["updatedAt"] = timestamp
+                        if updated_by:
+                            item["updatedBy"] = updated_by
+                        table.put_item(Item=item)
+                    
+                    return SuccessResponse.build({"message": "Customer and all related data soft deleted", "itemsUpdated": len(items)})
+                else:
+                    # Hard delete all items
+                    for item in items:
+                        table.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+                    
+                    return SuccessResponse.build({"message": "Customer and all related data deleted"})
 
         return ErrorResponse.build("Unsupported method", 405)
 

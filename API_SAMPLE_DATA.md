@@ -8,6 +8,11 @@ Base URL: `https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev`
 
 **Important:** All device operations require `EntityType` and `DeviceId` as mandatory parameters.
 
+**Audit Trail Fields:** All device entities automatically track:
+- `CreatedDate` / `UpdatedDate` - ISO 8601 timestamps with Z suffix
+- `CreatedBy` / `UpdatedBy` - User identity (email) who created/last modified the record
+- POST operations set all four fields; PUT operations update only UpdatedDate and UpdatedBy
+
 ### GET /devices
 **Description:** List all devices (EntityType defaults to "DEVICE" if not provided)  
 **Query Parameters (Optional):**
@@ -139,7 +144,9 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices
     "Status": "available",
     "Location": "Warehouse A",
     "CreatedDate": "2026-01-16T11:30:00Z",
-    "UpdatedDate": "2026-01-16T11:30:00Z"
+    "UpdatedDate": "2026-01-16T11:30:00Z",
+    "CreatedBy": "admin@example.com",
+    "UpdatedBy": "admin@example.com"
   }
 }
 ```
@@ -175,7 +182,9 @@ curl -X PUT https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices 
     "DeviceId": "DEV099",
     "DeviceName": "Updated Water Sensor",
     "Status": "Active",
-    "Location": "Site B"
+    "Location": "Site B",
+    "UpdatedDate": "2026-01-21T10:50:00Z",
+    "UpdatedBy": "admin@example.com"
   }
 }
 ```
@@ -763,6 +772,12 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/
 
 ## 2. CUSTOMERS API
 
+**Important Changes:**
+- **Auto-generated IDs**: `customerId` (CUST{UUID8}), `contactId` (CONT{UUID8}), `addressId` (ADDR{UUID8}) are now auto-generated
+- **Timestamp Fields**: All entities include `createdAt`, `createdBy`, `updatedAt`, `updatedBy`
+- **Soft Delete**: All DELETE operations support `?soft=true` query parameter to mark as inactive instead of permanent deletion
+- **No Manual PK/SK**: Frontend no longer needs to construct PK/SK - they're generated automatically
+
 ### GET /customers
 **Description:** List all customers  
 **Request:**
@@ -774,14 +789,23 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customer
 ```json
 [
   {
-    "PK": "CUSTOMER#CUST001",
+    "PK": "CUSTOMER#CUST2FB2591F",
     "SK": "ENTITY#CUSTOMER",
+    "entityType": "customer",
+    "customerId": "CUST2FB2591F",
+    "customerNumber": "CN-2026-001",
     "name": "ABC Corporation",
     "companyName": "ABC Corp Pvt Ltd",
     "email": "contact@abccorp.com",
     "phone": "9876543210",
+    "countryCode": "+91",
     "gstin": "29ABCDE1234F1Z5",
-    "isActive": true
+    "pan": "AAAPL1234C",
+    "isActive": true,
+    "createdAt": "2026-01-21T08:30:00Z",
+    "createdBy": "admin@example.com",
+    "updatedAt": "2026-01-21T08:30:00Z",
+    "updatedBy": "admin@example.com"
   }
 ]
 ```
@@ -790,72 +814,108 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customer
 **Description:** Get customer with nested contacts and addresses  
 **Request:**
 ```bash
-curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST001
+curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F
 ```
 
 **Response (200):**
 ```json
 {
-  "PK": "CUSTOMER#CUST001",
+  "PK": "CUSTOMER#CUST2FB2591F",
   "SK": "ENTITY#CUSTOMER",
+  "entityType": "customer",
+  "customerId": "CUST2FB2591F",
+  "customerNumber": "CN-2026-001",
   "name": "ABC Corporation",
   "companyName": "ABC Corp Pvt Ltd",
   "email": "contact@abccorp.com",
   "phone": "9876543210",
+  "countryCode": "+91",
+  "gstin": "29ABCDE1234F1Z5",
+  "isActive": true,
+  "createdAt": "2026-01-21T08:30:00Z",
+  "createdBy": "admin@example.com",
+  "updatedAt": "2026-01-21T10:15:00Z",
+  "updatedBy": "admin@example.com",
   "contacts": [
     {
-      "PK": "CUSTOMER#CUST001",
-      "SK": "ENTITY#CONTACT#C1",
+      "PK": "CUSTOMER#CUST2FB2591F",
+      "SK": "ENTITY#CONTACT#CONT4A3B2C1D",
+      "entityType": "contact",
+      "contactId": "CONT4A3B2C1D",
       "firstName": "John",
       "lastName": "Doe",
+      "displayName": "John Doe",
       "email": "john@abccorp.com",
-      "contactType": "primary"
+      "mobileNumber": "9876543210",
+      "countryCode": "+91",
+      "contactType": "primary",
+      "createAsUser": false,
+      "userId": "USR001",
+      "isActive": true,
+      "createdAt": "2026-01-21T09:00:00Z",
+      "createdBy": "admin@example.com",
+      "updatedAt": "2026-01-21T09:00:00Z",
+      "updatedBy": "admin@example.com"
     }
   ],
   "addresses": [
     {
-      "PK": "CUSTOMER#CUST001",
-      "SK": "ENTITY#ADDRESS#A2",
-      "addressType": "ship_to",
-      "addressLine1": "456 Industrial Area",
-      "city": "Pune",
+      "PK": "CUSTOMER#CUST2FB2591F",
+      "SK": "ENTITY#ADDRESS#ADDR8E7F6G5H",
+      "entityType": "address",
+      "addressId": "ADDR8E7F6G5H",
+      "addressType": "billing",
+      "addressLine1": "123 Business Street",
+      "addressLine2": "Suite 500",
+      "city": "Mumbai",
       "state": "Maharashtra",
-      "pincode": "411001"
+      "pincode": "400001",
+      "country": "India",
+      "isPrimary": true,
+      "isActive": true,
+      "createdAt": "2026-01-21T09:15:00Z",
+      "createdBy": "admin@example.com",
+      "updatedAt": "2026-01-21T09:15:00Z",
+      "updatedBy": "admin@example.com"
     }
   ]
 }
 ```
 
 ### POST /customers
-**Description:** Create new customer  
-**Note:** Duplicate prevention is enabled - attempting to create a customer with an existing PK/SK will return 409 Conflict.
+**Description:** Create new customer with auto-generated ID  
+**Important:** 
+- `customerId` is auto-generated (CUST{UUID8})
+- `customerNumber` is optional and user-provided for business reference
+- No need to provide PK/SK - they are constructed automatically
+- Duplicate prevention enabled - returns 409 if customer already exists
 
 **Request:**
 ```bash
 curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers \
   -H "Content-Type: application/json" \
   -d '{
-    "PK": "CUSTOMER#CUST999",
-    "SK": "ENTITY#CUSTOMER",
-    "entityType": "customer",
     "name": "New Company Ltd",
     "companyName": "New Company Private Limited",
+    "customerNumber": "CN-2026-002",
     "email": "info@newcompany.com",
     "phone": "9123456789",
     "countryCode": "+91",
     "gstin": "29XXXXX1234X1Z5",
     "pan": "AAAAA9999A",
     "isActive": true,
-    "createdBy": "admin"
+    "createdBy": "admin@example.com"
   }'
 ```
 
 **Response (201):**
 ```json
 {
-  "PK": "CUSTOMER#CUST999",
+  "PK": "CUSTOMER#CUST9A8B7C6D",
   "SK": "ENTITY#CUSTOMER",
   "entityType": "customer",
+  "customerId": "CUST9A8B7C6D",
+  "customerNumber": "CN-2026-002",
   "name": "New Company Ltd",
   "companyName": "New Company Private Limited",
   "email": "info@newcompany.com",
@@ -864,14 +924,17 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/custome
   "gstin": "29XXXXX1234X1Z5",
   "pan": "AAAAA9999A",
   "isActive": true,
-  "createdBy": "admin"
+  "createdAt": "2026-01-21T11:00:00Z",
+  "createdBy": "admin@example.com",
+  "updatedAt": "2026-01-21T11:00:00Z",
+  "updatedBy": "admin@example.com"
 }
 ```
 
 **Response (409 - Duplicate):**
 ```json
 {
-  "error": "Customer CUSTOMER#CUST999 already exists"
+  "error": "Customer CUST9A8B7C6D already exists"
 }
 ```
 
@@ -879,30 +942,51 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/custome
 **Description:** List all contacts for a customer  
 **Request:**
 ```bash
-curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST001/contacts
+curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F/contacts
 ```
 
 **Response (200):**
 ```json
 [
   {
-    "PK": "CUSTOMER#CUST001",
-    "SK": "ENTITY#CONTACT#C1",
+    "PK": "CUSTOMER#CUST2FB2591F",
+    "SK": "ENTITY#CONTACT#CONT4A3B2C1D",
+    "entityType": "contact",
+    "contactId": "CONT4A3B2C1D",
     "firstName": "John",
     "lastName": "Doe",
+    "displayName": "John Doe",
     "email": "john@abccorp.com",
     "mobileNumber": "9876543210",
+    "countryCode": "+91",
     "contactType": "primary",
-    "isActive": true
+    "createAsUser": false,
+    "userId": "USR001",
+    "isActive": true,
+    "createdAt": "2026-01-21T09:00:00Z",
+    "createdBy": "admin@example.com",
+    "updatedAt": "2026-01-21T09:00:00Z",
+    "updatedBy": "admin@example.com"
   },
   {
-    "PK": "CUSTOMER#CUST001",
-    "SK": "ENTITY#CONTACT#C2",
+    "PK": "CUSTOMER#CUST2FB2591F",
+    "SK": "ENTITY#CONTACT#CONT5D6E7F8G",
+    "entityType": "contact",
+    "contactId": "CONT5D6E7F8G",
     "firstName": "Jane",
     "lastName": "Smith",
+    "displayName": "Jane Smith",
     "email": "jane@abccorp.com",
+    "mobileNumber": "9988776655",
+    "countryCode": "+91",
     "contactType": "secondary",
-    "isActive": true
+    "createAsUser": false,
+    "userId": "USR002",
+    "isActive": true,
+    "createdAt": "2026-01-21T09:30:00Z",
+    "createdBy": "admin@example.com",
+    "updatedAt": "2026-01-21T09:30:00Z",
+    "updatedBy": "admin@example.com"
   }
 ]
 ```
@@ -911,14 +995,16 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customer
 **Description:** Get specific contact by ID  
 **Request:**
 ```bash
-curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST001/contacts/C1
+curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F/contacts/CONT4A3B2C1D
 ```
 
 **Response (200):**
 ```json
 {
-  "PK": "CUSTOMER#CUST001",
-  "SK": "ENTITY#CONTACT#C1",
+  "PK": "CUSTOMER#CUST2FB2591F",
+  "SK": "ENTITY#CONTACT#CONT4A3B2C1D",
+  "entityType": "contact",
+  "contactId": "CONT4A3B2C1D",
   "firstName": "John",
   "lastName": "Doe",
   "displayName": "John Doe",
@@ -926,19 +1012,28 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customer
   "mobileNumber": "9876543210",
   "countryCode": "+91",
   "contactType": "primary",
-  "isActive": true
+  "createAsUser": false,
+  "userId": "USR001",
+  "isActive": true,
+  "createdAt": "2026-01-21T09:00:00Z",
+  "createdBy": "admin@example.com",
+  "updatedAt": "2026-01-21T10:30:00Z",
+  "updatedBy": "manager@example.com"
 }
 ```
 
 ### POST /customers/{customerId}/contacts
-**Description:** Add contact to customer  
+**Description:** Add contact to customer with auto-generated ID  
+**Important:**
+- `contactId` is auto-generated (CONT{UUID8})
+- No need to provide PK/SK - they are constructed automatically
+- `createdAt`, `updatedAt`, and `updatedBy` are set automatically
+
 **Request:**
 ```bash
-curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST001/contacts \
+curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F/contacts \
   -H "Content-Type: application/json" \
   -d '{
-    "PK": "CUSTOMER#CUST001",
-    "SK": "ENTITY#CONTACT#C999",
     "entityType": "contact",
     "firstName": "Jane",
     "lastName": "Smith",
@@ -947,51 +1042,128 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/custome
     "mobileNumber": "9988776655",
     "countryCode": "+91",
     "contactType": "secondary",
-    "isActive": true
+    "createAsUser": false,
+    "userId": "USR003",
+    "isActive": true,
+    "createdBy": "admin@example.com"
   }'
 ```
 
-**Response (200):**
+**Response (201):**
 ```json
 {
-  "message": "Contact created successfully"
+  "PK": "CUSTOMER#CUST2FB2591F",
+  "SK": "ENTITY#CONTACT#CONT9H8I7J6K",
+  "entityType": "contact",
+  "contactId": "CONT9H8I7J6K",
+  "firstName": "Jane",
+  "lastName": "Smith",
+  "displayName": "Jane Smith",
+  "email": "jane.smith@example.com",
+  "mobileNumber": "9988776655",
+  "countryCode": "+91",
+  "contactType": "secondary",
+  "createAsUser": false,
+  "userId": "USR003",
+  "isActive": true,
+  "createdAt": "2026-01-21T11:30:00Z",
+  "createdBy": "admin@example.com",
+  "updatedAt": "2026-01-21T11:30:00Z",
+  "updatedBy": "admin@example.com"
+}
+```
+
+**Response (409 - Duplicate):**
+```json
+{
+  "error": "Contact CONT9H8I7J6K already exists"
 }
 ```
 
 ### PUT /customers/{customerId}/contacts/{contactId}
 **Description:** Update contact  
+**Important:** `updatedAt` and `updatedBy` are set automatically
+
 **Request:**
 ```bash
-curl -X PUT https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST001/contacts/C999 \
+curl -X PUT https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F/contacts/CONT9H8I7J6K \
   -H "Content-Type: application/json" \
   -d '{
-    "PK": "CUSTOMER#CUST001",
-    "SK": "ENTITY#CONTACT#C999",
+    "PK": "CUSTOMER#CUST2FB2591F",
+    "SK": "ENTITY#CONTACT#CONT9H8I7J6K",
+    "entityType": "contact",
+    "contactId": "CONT9H8I7J6K",
     "firstName": "Jane",
     "lastName": "Smith Updated",
+    "displayName": "Jane Smith",
+    "email": "jane.smith@example.com",
     "mobileNumber": "9988776666",
-    "contactType": "primary"
+    "countryCode": "+91",
+    "contactType": "primary",
+    "createAsUser": false,
+    "userId": "USR003",
+    "isActive": true,
+    "createdAt": "2026-01-21T11:30:00Z",
+    "createdBy": "admin@example.com"
   }'
 ```
 
 **Response (200):**
 ```json
 {
-  "message": "Contact updated successfully"
+  "PK": "CUSTOMER#CUST2FB2591F",
+  "SK": "ENTITY#CONTACT#CONT9H8I7J6K",
+  "entityType": "contact",
+  "contactId": "CONT9H8I7J6K",
+  "firstName": "Jane",
+  "lastName": "Smith Updated",
+  "mobileNumber": "9988776666",
+  "contactType": "primary",
+  "isActive": true,
+  "createdAt": "2026-01-21T11:30:00Z",
+  "createdBy": "admin@example.com",
+  "updatedAt": "2026-01-21T12:00:00Z",
+  "updatedBy": "admin@example.com"
 }
 ```
 
 ### DELETE /customers/{customerId}/contacts/{contactId}
-**Description:** Delete contact  
-**Request:**
+**Description:** Delete contact (supports soft delete)  
+**Query Parameters:**
+- `soft` - Set to "true" for soft delete (marks as inactive), omit for hard delete
+- `updatedBy` - User who performed the deletion (optional, for soft delete)
+
+**Hard Delete Request:**
 ```bash
-curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST001/contacts/C999
+curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F/contacts/CONT9H8I7J6K
 ```
 
-**Response (200):**
+**Hard Delete Response (200):**
 ```json
 {
   "message": "Contact deleted"
+}
+```
+
+**Soft Delete Request:**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F/contacts/CONT9H8I7J6K?soft=true&updatedBy=admin@example.com"
+```
+
+**Soft Delete Response (200):**
+```json
+{
+  "message": "Contact soft deleted",
+  "data": {
+    "PK": "CUSTOMER#CUST2FB2591F",
+    "SK": "ENTITY#CONTACT#CONT9H8I7J6K",
+    "contactId": "CONT9H8I7J6K",
+    "firstName": "Jane",
+    "lastName": "Smith Updated",
+    "isActive": false,
+    "updatedAt": "2026-01-21T13:00:00Z",
+    "updatedBy": "admin@example.com"
+  }
 }
 ```
 
@@ -999,35 +1171,49 @@ curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/custo
 **Description:** List all addresses for a customer  
 **Request:**
 ```bash
-curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST001/addresses
+curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F/addresses
 ```
 
 **Response (200):**
 ```json
 [
   {
-    "PK": "CUSTOMER#CUST001",
-    "SK": "ENTITY#ADDRESS#A1",
+    "PK": "CUSTOMER#CUST2FB2591F",
+    "SK": "ENTITY#ADDRESS#ADDR8E7F6G5H",
+    "entityType": "address",
+    "addressId": "ADDR8E7F6G5H",
     "addressType": "billing",
     "addressLine1": "123 Business Street",
+    "addressLine2": "Suite 500",
     "city": "Mumbai",
     "state": "Maharashtra",
     "pincode": "400001",
     "country": "India",
     "isPrimary": true,
-    "isActive": true
+    "isActive": true,
+    "createdAt": "2026-01-21T09:15:00Z",
+    "createdBy": "admin@example.com",
+    "updatedAt": "2026-01-21T09:15:00Z",
+    "updatedBy": "admin@example.com"
   },
   {
-    "PK": "CUSTOMER#CUST001",
-    "SK": "ENTITY#ADDRESS#A2",
+    "PK": "CUSTOMER#CUST2FB2591F",
+    "SK": "ENTITY#ADDRESS#ADDR1L2M3N4O",
+    "entityType": "address",
+    "addressId": "ADDR1L2M3N4O",
     "addressType": "ship_to",
     "addressLine1": "456 Industrial Area",
+    "addressLine2": "Near Highway",
     "city": "Pune",
     "state": "Maharashtra",
     "pincode": "411001",
     "country": "India",
     "isPrimary": false,
-    "isActive": true
+    "isActive": true,
+    "createdAt": "2026-01-21T10:00:00Z",
+    "createdBy": "admin@example.com",
+    "updatedAt": "2026-01-21T10:00:00Z",
+    "updatedBy": "admin@example.com"
   }
 ]
 ```
@@ -1036,14 +1222,16 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customer
 **Description:** Get specific address by ID  
 **Request:**
 ```bash
-curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST001/addresses/A2
+curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F/addresses/ADDR1L2M3N4O
 ```
 
 **Response (200):**
 ```json
 {
-  "PK": "CUSTOMER#CUST001",
-  "SK": "ENTITY#ADDRESS#A2",
+  "PK": "CUSTOMER#CUST2FB2591F",
+  "SK": "ENTITY#ADDRESS#ADDR1L2M3N4O",
+  "entityType": "address",
+  "addressId": "ADDR1L2M3N4O",
   "addressType": "ship_to",
   "addressLine1": "456 Industrial Area",
   "addressLine2": "Near Highway",
@@ -1052,19 +1240,26 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customer
   "pincode": "411001",
   "country": "India",
   "isPrimary": false,
-  "isActive": true
+  "isActive": true,
+  "createdAt": "2026-01-21T10:00:00Z",
+  "createdBy": "admin@example.com",
+  "updatedAt": "2026-01-21T11:45:00Z",
+  "updatedBy": "manager@example.com"
 }
 ```
 
 ### POST /customers/{customerId}/addresses
-**Description:** Add address to customer  
+**Description:** Add address to customer with auto-generated ID  
+**Important:**
+- `addressId` is auto-generated (ADDR{UUID8})
+- No need to provide PK/SK - they are constructed automatically
+- `createdAt`, `updatedAt`, and `updatedBy` are set automatically
+
 **Request:**
 ```bash
-curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST001/addresses \
+curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F/addresses \
   -H "Content-Type: application/json" \
   -d '{
-    "PK": "CUSTOMER#CUST001",
-    "SK": "ENTITY#ADDRESS#A999",
     "entityType": "address",
     "addressType": "billing",
     "addressLine1": "123 Business Park",
@@ -1074,91 +1269,211 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/custome
     "pincode": "400001",
     "country": "India",
     "isPrimary": false,
-    "isActive": true
+    "isActive": true,
+    "createdBy": "admin@example.com"
   }'
 ```
 
-**Response (200):**
+**Response (201):**
 ```json
 {
-  "message": "Address created successfully"
+  "PK": "CUSTOMER#CUST2FB2591F",
+  "SK": "ENTITY#ADDRESS#ADDR5P6Q7R8S",
+  "entityType": "address",
+  "addressId": "ADDR5P6Q7R8S",
+  "addressType": "billing",
+  "addressLine1": "123 Business Park",
+  "addressLine2": "Tower A, Floor 5",
+  "city": "Mumbai",
+  "state": "Maharashtra",
+  "pincode": "400001",
+  "country": "India",
+  "isPrimary": false,
+  "isActive": true,
+  "createdAt": "2026-01-21T12:30:00Z",
+  "createdBy": "admin@example.com",
+  "updatedAt": "2026-01-21T12:30:00Z",
+  "updatedBy": "admin@example.com"
+}
+```
+
+**Response (409 - Duplicate):**
+```json
+{
+  "error": "Address ADDR5P6Q7R8S already exists"
 }
 ```
 
 ### PUT /customers/{customerId}/addresses/{addressId}
 **Description:** Update address  
+**Important:** `updatedAt` and `updatedBy` are set automatically
+
 **Request:**
 ```bash
-curl -X PUT https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST001/addresses/A999 \
+curl -X PUT https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F/addresses/ADDR5P6Q7R8S \
   -H "Content-Type: application/json" \
   -d '{
-    "PK": "CUSTOMER#CUST001",
-    "SK": "ENTITY#ADDRESS#A999",
+    "PK": "CUSTOMER#CUST2FB2591F",
+    "SK": "ENTITY#ADDRESS#ADDR5P6Q7R8S",
+    "entityType": "address",
+    "addressId": "ADDR5P6Q7R8S",
+    "addressType": "billing",
     "addressLine1": "123 Updated Business Park",
     "addressLine2": "Tower B, Floor 10",
-    "isPrimary": true
+    "city": "Mumbai",
+    "state": "Maharashtra",
+    "pincode": "400001",
+    "country": "India",
+    "isPrimary": true,
+    "isActive": true,
+    "createdAt": "2026-01-21T12:30:00Z",
+    "createdBy": "admin@example.com"
   }'
 ```
 
 **Response (200):**
 ```json
 {
-  "message": "Address updated successfully"
+  "PK": "CUSTOMER#CUST2FB2591F",
+  "SK": "ENTITY#ADDRESS#ADDR5P6Q7R8S",
+  "entityType": "address",
+  "addressId": "ADDR5P6Q7R8S",
+  "addressLine1": "123 Updated Business Park",
+  "addressLine2": "Tower B, Floor 10",
+  "isPrimary": true,
+  "isActive": true,
+  "createdAt": "2026-01-21T12:30:00Z",
+  "createdBy": "admin@example.com",
+  "updatedAt": "2026-01-21T13:15:00Z",
+  "updatedBy": "admin@example.com"
 }
 ```
 
 ### DELETE /customers/{customerId}/addresses/{addressId}
-**Description:** Delete address  
-**Request:**
+**Description:** Delete address (supports soft delete)  
+**Query Parameters:**
+- `soft` - Set to "true" for soft delete (marks as inactive), omit for hard delete
+- `updatedBy` - User who performed the deletion (optional, for soft delete)
+
+**Hard Delete Request:**
 ```bash
-curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST001/addresses/A999
+curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F/addresses/ADDR5P6Q7R8S
 ```
 
-**Response (200):**
+**Hard Delete Response (200):**
 ```json
 {
   "message": "Address deleted"
 }
 ```
 
+**Soft Delete Request:**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST2FB2591F/addresses/ADDR5P6Q7R8S?soft=true&updatedBy=admin@example.com"
+```
+
+**Soft Delete Response (200):**
+```json
+{
+  "message": "Address soft deleted",
+  "data": {
+    "PK": "CUSTOMER#CUST2FB2591F",
+    "SK": "ENTITY#ADDRESS#ADDR5P6Q7R8S",
+    "addressId": "ADDR5P6Q7R8S",
+    "addressLine1": "123 Updated Business Park",
+    "isActive": false,
+    "updatedAt": "2026-01-21T14:00:00Z",
+    "updatedBy": "admin@example.com"
+  }
+}
+```
+
 ### PUT /customers/{customerId}
 **Description:** Update customer  
+**Important:** `updatedAt` and `updatedBy` are set automatically
+
 **Request:**
 ```bash
-curl -X PUT https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST999 \
+curl -X PUT https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST9A8B7C6D \
   -H "Content-Type: application/json" \
   -d '{
-    "PK": "CUSTOMER#CUST999",
+    "PK": "CUSTOMER#CUST9A8B7C6D",
     "SK": "ENTITY#CUSTOMER",
-    "companyName": "Updated Company Name",
-    "phone": "9999999999"
+    "entityType": "customer",
+    "customerId": "CUST9A8B7C6D",
+    "customerNumber": "CN-2026-002",
+    "name": "New Company Ltd",
+    "companyName": "Updated Company Name Private Limited",
+    "email": "info@newcompany.com",
+    "phone": "9999999999",
+    "countryCode": "+91",
+    "gstin": "29XXXXX1234X1Z5",
+    "pan": "AAAAA9999A",
+    "isActive": true,
+    "createdAt": "2026-01-21T11:00:00Z",
+    "createdBy": "admin@example.com"
   }'
 ```
 
 **Response (200):**
 ```json
 {
-  "message": "Customer updated successfully"
+  "PK": "CUSTOMER#CUST9A8B7C6D",
+  "SK": "ENTITY#CUSTOMER",
+  "entityType": "customer",
+  "customerId": "CUST9A8B7C6D",
+  "customerNumber": "CN-2026-002",
+  "companyName": "Updated Company Name Private Limited",
+  "phone": "9999999999",
+  "isActive": true,
+  "createdAt": "2026-01-21T11:00:00Z",
+  "createdBy": "admin@example.com",
+  "updatedAt": "2026-01-21T14:30:00Z",
+  "updatedBy": "admin@example.com"
 }
 ```
 
 ### DELETE /customers/{customerId}
-**Description:** Delete customer (cascade deletes contacts and addresses)  
-**Request:**
+**Description:** Delete customer (cascade deletes/marks all contacts and addresses)  
+**Query Parameters:**
+- `soft` - Set to "true" for soft delete (marks customer and all related data as inactive), omit for hard delete
+- `updatedBy` - User who performed the deletion (optional, for soft delete)
+
+**Hard Delete Request:**
 ```bash
-curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST999
+curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST9A8B7C6D
 ```
 
-**Response (200):**
+**Hard Delete Response (200):**
 ```json
 {
   "message": "Customer and all related data deleted"
 }
 ```
 
+**Soft Delete Request:**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/customers/CUST9A8B7C6D?soft=true&updatedBy=admin@example.com"
+```
+
+**Soft Delete Response (200):**
+```json
+{
+  "message": "Customer and all related data soft deleted",
+  "itemsUpdated": 5
+}
+```
+
+**Note:** Soft delete marks the customer, all contacts, and all addresses as `isActive: false` and updates their `updatedAt`/`updatedBy` fields. Hard delete permanently removes all records from the database.
+
 ---
 
 ## 3. USERS API
+
+**Audit Trail Fields:** All user records automatically track:
+- `createdAt` / `updatedAt` - ISO 8601 timestamps with Z suffix
+- `createdBy` / `updatedBy` - User identity (email) who created/last modified the record
+- POST operations set all four fields; PUT operations update only updatedAt and updatedBy
 
 ### GET /users
 **Description:** List all users  
@@ -1184,7 +1499,9 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users
     "isActive": true,
     "emailVerified": true,
     "createdAt": "2024-01-10T10:00:00Z",
-    "updatedAt": "2024-01-10T10:00:00Z"
+    "updatedAt": "2024-01-10T10:00:00Z",
+    "createdBy": "system",
+    "updatedBy": "system"
   }
 ]
 ```
@@ -1229,7 +1546,8 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users \
     "isActive": true,
     "emailVerified": false,
     "createdAt": "2026-01-16T10:00:00Z",
-    "updatedAt": "2026-01-16T10:00:00Z"
+    "updatedAt": "2026-01-16T10:00:00Z",
+    "createdBy": "admin@vinkane.com"
   }'
 ```
 
@@ -1488,6 +1806,11 @@ curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/regio
 
 ## 5. SIMCARDS API
 
+**Audit Trail Fields:** All SIM card records automatically track:
+- `createdAt` / `updatedAt` - ISO 8601 timestamps with Z suffix
+- `createdBy` / `updatedBy` - User identity (email) who created/last modified the record
+- POST operations set all four fields; PUT operations update only updatedAt and updatedBy
+
 ### GET /simcards
 **Description:** List all SIM cards  
 **Request:**
@@ -1539,24 +1862,36 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/simcards
 curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/simcards \
   -H "Content-Type: application/json" \
   -d '{
-    "PK": "SIM#SIM999",
+    "PK": "SIM999",
     "SK": "META",
-    "simId": "SIM999",
-    "iccid": "8991234567890999999",
-    "phoneNumber": "+919999999999",
+    "simCardNumber": "8991234567890999999",
+    "mobileNumber": "+919999999999",
     "provider": "Jio",
+    "planType": "Prepaid",
+    "simType": "4G",
+    "monthlyDataLimit": 5120,
     "status": "inactive",
-    "dataLimit": "5GB",
-    "assignedDevice": null,
-    "activatedDate": null,
-    "expiryDate": "2027-01-01T00:00:00Z"
+    "createdBy": "admin@vinkane.com"
   }'
 ```
 
-**Response (200):**
+**Response (201):**
 ```json
 {
-  "message": "SIM card created successfully"
+  "PK": "SIMCARD#SIM999",
+  "SK": "ENTITY#SIMCARD",
+  "entityType": "SIMCARD",
+  "simCardNumber": "8991234567890999999",
+  "mobileNumber": "+919999999999",
+  "provider": "Jio",
+  "planType": "Prepaid",
+  "simType": "4G",
+  "monthlyDataLimit": 5120,
+  "status": "inactive",
+  "createdAt": "2026-01-21T10:53:00Z",
+  "updatedAt": "2026-01-21T10:53:00Z",
+  "createdBy": "admin@vinkane.com",
+  "updatedBy": "admin@vinkane.com"
 }
 ```
 
@@ -1567,18 +1902,35 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/simcard
 curl -X PUT https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/simcards/SIM999 \
   -H "Content-Type: application/json" \
   -d '{
-    "PK": "SIM#SIM999",
+    "PK": "SIM999",
     "SK": "META",
+    "simCardNumber": "8991234567890999999",
+    "mobileNumber": "+919999999999",
+    "provider": "Jio",
+    "planType": "Prepaid",
+    "simType": "4G",
+    "monthlyDataLimit": 5120,
     "status": "active",
-    "assignedDevice": "DEV099",
-    "activatedDate": "2026-01-16T10:00:00Z"
+    "activationDate": "2026-01-21T10:55:00Z"
   }'
 ```
 
 **Response (200):**
 ```json
 {
-  "message": "SIM card updated successfully"
+  "PK": "SIMCARD#SIM999",
+  "SK": "ENTITY#SIMCARD",
+  "entityType": "SIMCARD",
+  "simCardNumber": "8991234567890999999",
+  "mobileNumber": "+919999999999",
+  "provider": "Jio",
+  "planType": "Prepaid",
+  "simType": "4G",
+  "monthlyDataLimit": 5120,
+  "status": "active",
+  "activationDate": "2026-01-21T10:55:00Z",
+  "updatedAt": "2026-01-21T10:55:30Z",
+  "updatedBy": "admin@vinkane.com"
 }
 ```
 
@@ -1651,6 +2003,12 @@ curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/simca
 
 ## 6. SURVEYS API (Field Survey)
 
+**Audit Trail Fields:** All survey records automatically track:
+- `CreatedDate` / `UpdatedDate` - ISO 8601 timestamps with Z suffix
+- `CreatedBy` / `UpdatedBy` - User identity (email) who created/last modified the record
+- POST operations set CreatedBy; PUT operations set UpdatedBy
+- Draft surveys can be edited; submitted surveys are immutable
+
 ### POST /surveys
 **Description:** Create new field survey (draft status)  
 **Request:**
@@ -1705,7 +2063,9 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/surveys
     "State": "TS",
     "District": "HYD",
     "CreatedDate": "2026-01-17T10:00:00Z",
-    "UpdatedDate": "2026-01-17T10:00:00Z"
+    "UpdatedDate": "2026-01-17T10:00:00Z",
+    "CreatedBy": "admin@vinkane.com",
+    "UpdatedBy": "admin@vinkane.com"
   }
 }
 ```

@@ -32,6 +32,8 @@ class DeviceMeta(BaseModel):
     EntityType: str
     CreatedDate: str = None
     UpdatedDate: str = None
+    CreatedBy: str = None
+    UpdatedBy: str = None
 
     class Config:
         extra = "forbid"
@@ -47,6 +49,8 @@ class DeviceConfig(BaseModel):
     EntityType: str
     CreatedDate: str = None
     UpdatedDate: str = None
+    CreatedBy: str = None
+    UpdatedBy: str = None
 
     class Config:
         extra = "forbid"
@@ -63,6 +67,8 @@ class DeviceRepair(BaseModel):
     EntityType: str
     CreatedDate: str = None
     UpdatedDate: str = None
+    CreatedBy: str = None
+    UpdatedBy: str = None
 
     class Config:
         extra = "forbid"
@@ -81,6 +87,8 @@ class DeviceInstall(BaseModel):
     EntityType: str
     CreatedDate: str = None
     UpdatedDate: str = None
+    CreatedBy: str = None
+    UpdatedBy: str = None
 
     class Config:
         extra = "forbid"
@@ -97,6 +105,8 @@ class DeviceRuntime(BaseModel):
     ttl: int = None
     CreatedDate: str = None
     UpdatedDate: str = None
+    CreatedBy: str = None
+    UpdatedBy: str = None
 
     class Config:
         extra = "forbid"
@@ -114,6 +124,8 @@ class SimMeta(BaseModel):
     EntityType: str
     CreatedDate: str = None
     UpdatedDate: str = None
+    CreatedBy: str = None
+    UpdatedBy: str = None
 
     class Config:
         extra = "forbid"
@@ -129,6 +141,8 @@ class SimAssoc(BaseModel):
     EntityType: str
     CreatedDate: str = None
     UpdatedDate: str = None
+    CreatedBy: str = None
+    UpdatedBy: str = None
 
     class Config:
         extra = "forbid"
@@ -478,10 +492,15 @@ def lambda_handler(event, context):
         item["SK"] = sk
 
         # Set timestamps if not provided
+        timestamp = datetime.utcnow().isoformat() + "Z"
         if not item.get("CreatedDate"):
-            item["CreatedDate"] = datetime.utcnow().isoformat() + "Z"
+            item["CreatedDate"] = timestamp
         if not item.get("UpdatedDate"):
-            item["UpdatedDate"] = datetime.utcnow().isoformat() + "Z"
+            item["UpdatedDate"] = timestamp
+        # Set CreatedBy and UpdatedBy
+        if item.get("CreatedBy"):
+            if not item.get("UpdatedBy"):
+                item["UpdatedBy"] = item["CreatedBy"]
 
         try:
             # Validate with Pydantic model
@@ -878,6 +897,11 @@ def lambda_handler(event, context):
         pk, sk = derive_pk_sk(item)
         if not pk or not sk:
             return ErrorResponse.build("Could not derive PK/SK for update", 400)
+
+        # Set UpdatedDate and UpdatedBy
+        item["UpdatedDate"] = datetime.utcnow().isoformat() + "Z"
+        if item.get("CreatedBy") and not item.get("UpdatedBy"):
+            item["UpdatedBy"] = item["CreatedBy"]
 
         # Remove PK and SK from update fields
         update_fields = {k: v for k, v in item.items() if k not in ["PK", "SK"]}

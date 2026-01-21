@@ -110,6 +110,7 @@ class Survey(BaseModel):
     UpdatedDate: Optional[str] = None
     SubmittedDate: Optional[str] = None
     CreatedBy: Optional[str] = None
+    UpdatedBy: Optional[str] = None
     
     class Config:
         extra = "allow"
@@ -388,11 +389,12 @@ def handle_update_survey(survey_id, event):
     body.pop("EntityType", None)
     body.pop("Status", None)
     body.pop("CreatedDate", None)
-    body.pop("CreatedBy", None)
     body.pop("SubmittedDate", None)
     
-    # Update timestamp
+    # Update timestamp and updatedBy
     body["UpdatedDate"] = datetime.utcnow().isoformat() + "Z"
+    if "CreatedBy" in body and "UpdatedBy" not in body:
+        body["UpdatedBy"] = body.pop("CreatedBy")
     
     # Build update expression
     reserved_keywords = {"Status", "State", "Condition"}

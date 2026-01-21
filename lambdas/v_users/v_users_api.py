@@ -2,6 +2,7 @@ import json
 import os
 import boto3
 import logging
+from datetime import datetime
 from decimal import Decimal
 from shared.response_utils import SuccessResponse, ErrorResponse
 from pydantic import BaseModel, ValidationError
@@ -30,6 +31,8 @@ class UserDetails(BaseModel):
     emailVerified: bool = False
     createdAt: str
     updatedAt: str
+    createdBy: str | None = None
+    updatedBy: str | None = None
 
     class Config:
         extra = "forbid"
@@ -104,6 +107,16 @@ def lambda_handler(event, context):
             item["PK"] = pk
             item["SK"] = sk
             item["id"] = user.id
+            
+            # Set timestamps and audit fields
+            timestamp = datetime.utcnow().isoformat() + "Z"
+            if not item.get("createdAt"):
+                item["createdAt"] = timestamp
+            if not item.get("updatedAt"):
+                item["updatedAt"] = timestamp
+            if item.get("createdBy") and not item.get("updatedBy"):
+                item["updatedBy"] = item["createdBy"]
+            
             logger.info(f"POST user creating with id={user.id}")
             table.put_item(Item=item)
             return SuccessResponse.build(simplify(item), status_code=201)
@@ -131,6 +144,12 @@ def lambda_handler(event, context):
             item["PK"] = pk
             item["SK"] = sk
             item["id"] = user_id
+            
+            # Update timestamp and audit fields
+            item["updatedAt"] = datetime.utcnow().isoformat() + "Z"
+            if item.get("createdBy") and not item.get("updatedBy"):
+                item["updatedBy"] = item["createdBy"]
+            
             table.put_item(Item=item)
             return SuccessResponse.build(simplify(item))
 

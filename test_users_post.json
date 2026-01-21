@@ -1,0 +1,8 @@
+{
+  "httpMethod": "POST",
+  "path": "/users",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"id\":\"user123\",\"PK\":\"USER#user123\",\"SK\":\"ENTITY#USER\",\"keycloakId\":\"kc123\",\"email\":\"testuser@example.com\",\"firstName\":\"Test\",\"lastName\":\"User\",\"name\":\"Test User\",\"role\":\"user\",\"isActive\":true,\"emailVerified\":true,\"createdAt\":\"2026-01-21T10:00:00Z\",\"updatedAt\":\"2026-01-21T10:00:00Z\",\"createdBy\":\"admin@example.com\"}"
+}

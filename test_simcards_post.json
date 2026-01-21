@@ -1,0 +1,8 @@
+{
+  "httpMethod": "POST",
+  "path": "/simcards",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"PK\":\"SIM001\",\"SK\":\"META\",\"simCardNumber\":\"8991234567890123456\",\"mobileNumber\":\"+919876543210\",\"provider\":\"Airtel\",\"planType\":\"Postpaid\",\"simType\":\"4G\",\"monthlyDataLimit\":10240,\"status\":\"active\",\"createdBy\":\"admin@example.com\"}"
+}

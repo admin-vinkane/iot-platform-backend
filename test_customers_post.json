@@ -1,0 +1,8 @@
+{
+  "httpMethod": "POST",
+  "path": "/customers",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"PK\":\"CUSTOMER#TEST001\",\"SK\":\"META\",\"entityType\":\"CUSTOMER\",\"name\":\"Test Customer\",\"email\":\"test@example.com\",\"phone\":\"9876543210\",\"countryCode\":\"+91\",\"isActive\":true,\"createdBy\":\"test-user@example.com\"}"
+}
