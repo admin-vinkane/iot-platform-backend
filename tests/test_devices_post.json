@@ -1,0 +1,8 @@
+{
+  "httpMethod": "POST",
+  "path": "/devices",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"EntityType\":\"DEVICE\",\"DeviceId\":\"TESTDEV001\",\"DeviceName\":\"Test Sensor\",\"DeviceType\":\"SENSOR\",\"SerialNumber\":\"SN12345\",\"Status\":\"ACTIVE\",\"Location\":\"Test Site\",\"CreatedBy\":\"admin@example.com\"}"
+}

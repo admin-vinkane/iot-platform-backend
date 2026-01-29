@@ -171,8 +171,12 @@ def lambda_handler(event, context):
             pk = f"SIMCARD#{sim_id}"
             sk = "ENTITY#SIMCARD"
 
-            if "Item" not in table.get_item(Key={"PK": pk, "SK": sk}):
+            # Fetch existing item to track changes
+            existing_response = table.get_item(Key={"PK": pk, "SK": sk})
+            if "Item" not in existing_response:
                 return build_response({"error": "SIM card not found"}, 404)
+            
+            existing_item = existing_response["Item"]
 
             item = sim.dict()
             item["PK"] = pk
@@ -180,9 +184,43 @@ def lambda_handler(event, context):
             
             # Set updatedAt and updatedBy
             from datetime import datetime
-            item["updatedAt"] = datetime.utcnow().isoformat() + "Z"
+            timestamp = datetime.utcnow().isoformat() + "Z"
+            item["updatedAt"] = timestamp
             if item.get("createdBy") and not item.get("updatedBy"):
                 item["updatedBy"] = item["createdBy"]
+
+            # Track changes for SIM cards
+            changes = {}
+            trackable_fields = ["status", "planType", "monthlyDataLimit", "monthlyCharges", 
+                              "isRoamingEnabled", "provider", "mobileNumber", "simType"]
+            
+            for field in trackable_fields:
+                old_value = existing_item.get(field)
+                new_value = item.get(field)
+                # Only track if field is being updated and value changed
+                if field in item and old_value != new_value:
+                    changes[field] = {
+                        "from": simplify(old_value) if isinstance(old_value, (dict, list)) else old_value,
+                        "to": simplify(new_value) if isinstance(new_value, (dict, list)) else new_value
+                    }
+
+            # Add changeHistory if there are changes
+            if changes:
+                history_entry = {
+                    "timestamp": timestamp,
+                    "action": "UPDATE",
+                    "changes": changes,
+                    "updatedBy": item.get("updatedBy", "system")
+                }
+                
+                # Get existing changeHistory and append
+                existing_history = existing_item.get("changeHistory", [])
+                item["changeHistory"] = existing_history + [history_entry]
+                
+                logger.info(f"Recording SIM changes: {changes}")
+            else:
+                # Keep existing history if no changes
+                item["changeHistory"] = existing_item.get("changeHistory", [])
 
             table.put_item(Item=item)
             return build_response(simplify(item))

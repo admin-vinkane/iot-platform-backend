@@ -241,6 +241,122 @@ curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devi
 }
 ```
 
+### POST /devices/{deviceId}/repairs
+**Description:** Create a repair record for a device  
+**⚠️ Note:** Requires Terraform route `POST /devices/{deviceId}/repairs` to be configured  
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/DEV009/repairs" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Replace water pump motor",
+    "cost": 5000,
+    "technician": "John Doe",
+    "status": "completed",
+    "createdBy": "admin@vinkane.com"
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "message": "Repair record created successfully",
+  "repair": {
+    "PK": "DEVICE#DEV009",
+    "SK": "REPAIR#REP2A3B4C5D#2026-01-28",
+    "EntityType": "REPAIR",
+    "DeviceId": "DEV009",
+    "RepairId": "REP2A3B4C5D",
+    "Description": "Replace water pump motor",
+    "Cost": 5000,
+    "Technician": "John Doe",
+    "Status": "completed",
+    "CreatedDate": "2026-01-28T04:32:15.123456Z",
+    "UpdatedDate": "2026-01-28T04:32:15.123456Z",
+    "CreatedBy": "admin@vinkane.com",
+    "UpdatedBy": "admin@vinkane.com"
+  }
+}
+```
+
+**Optional Fields:**
+- `repairId` - If not provided, auto-generated as `REP{UUID}`
+- `description`, `cost`, `technician`, `status`, `createdBy`
+
+### PUT /devices/{deviceId}/repairs/{repairId}
+**Description:** Update an existing repair record  
+**⚠️ Note:** Requires Terraform route `PUT /devices/{deviceId}/repairs/{repairId}` to be configured  
+**Request:**
+```bash
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/DEV009/repairs/REP2A3B4C5D" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "status": "in-progress",
+    "description": "Replace water pump motor - in progress",
+    "cost": 5200,
+    "technician": "Jane Smith",
+    "updatedBy": "admin"
+  }'
+```
+
+**Updatable Fields:**
+- `description`, `cost`, `technician`, `status`, `updatedBy`
+
+**Response (200):**
+```json
+{
+  "message": "Repair record updated successfully",
+  "repair": {
+    "PK": "DEVICE#DEV009",
+    "SK": "REPAIR#REP2A3B4C5D#2026-01-28",
+    "EntityType": "REPAIR",
+    "DeviceId": "DEV009",
+    "RepairId": "REP2A3B4C5D",
+    "Description": "Replace water pump motor - in progress",
+    "Cost": 5200,
+    "Technician": "Jane Smith",
+    "Status": "in-progress",
+    "CreatedDate": "2026-01-28T04:32:15.123456Z",
+    "UpdatedDate": "2026-01-28T05:45:30.654321Z",
+    "CreatedBy": "system",
+    "UpdatedBy": "admin"
+  }
+}
+```
+
+### GET /devices/{deviceId}/repairs
+**Description:** Get all repair records for a device  
+**⚠️ Note:** Requires Terraform route `GET /devices/{deviceId}/repairs` to be configured  
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/DEV009/repairs"
+```
+
+**Response (200):**
+```json
+{
+  "deviceId": "DEV009",
+  "repairCount": 2,
+  "repairs": [
+    {
+      "PK": "DEVICE#DEV009",
+      "SK": "REPAIR#REP2A3B4C5D#2026-01-28",
+      "EntityType": "REPAIR",
+      "DeviceId": "DEV009",
+      "RepairId": "REP2A3B4C5D",
+      "Description": "Replace water pump motor",
+      "Cost": 5000,
+      "Technician": "John Doe",
+      "Status": "completed",
+      "CreatedDate": "2026-01-28T04:32:15.123456Z",
+      "UpdatedDate": "2026-01-28T04:32:15.123456Z",
+      "CreatedBy": "admin@vinkane.com",
+      "UpdatedBy": "admin@vinkane.com"
+    }
+  ]
+}
+```
+
 ### DELETE /devices - Repair Entity
 **Description:** Delete specific device repair record  
 **Required Parameters:** DeviceId, EntityType, RepairId, CreatedDate  
@@ -286,6 +402,43 @@ curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devi
 - One SIM can only be linked to one device at a time
 - Device cannot have multiple SIMs linked simultaneously
 - SIM must be in "active" status and not already linked to another device
+
+**Device Configuration Page - Safe API Flow:**
+
+1. **Validate Inputs (before showing Link UI):**
+   ```bash
+   # Check device exists and is linkable
+   GET /devices/{deviceId}
+   
+   # Check SIM exists, is active, and not already linked
+   GET /simcards/{simId}  # Verify linkedDeviceId is null/absent
+   ```
+
+2. **Link Operation:**
+   ```bash
+   # Atomically links SIM to device
+   POST /devices/{deviceId}/sim/link
+   # This endpoint automatically:
+   # - Validates device exists
+   # - Validates SIM exists and is not linked to another device
+   # - Writes SIM_ASSOC record (if used)
+   # - Updates SIM record: linkedDeviceId = deviceId
+   # - Records changeHistory/audit trail
+   ```
+
+3. **Post-Link Verification:**
+   ```bash
+   # Verify linkage successful
+   GET /devices/{deviceId}  # Check LinkedSIM.simId matches
+   GET /simcards/{simId}    # Confirm linkedDeviceId = deviceId
+   ```
+
+4. **UI Guidelines:**
+   - Disable "Link" button while POST is in flight
+   - On success, refresh device details automatically
+   - If SIM already linked to another device, surface the specific deviceId and block the link (or offer guided unlink-from-other first)
+   - Display error messages clearly if validation fails
+
 **Request:**
 ```bash
 curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/DEV001/sim/link \
@@ -349,6 +502,12 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices
 ### POST /devices/{deviceId}/sim/unlink
 **Description:** Unlink the currently linked SIM card from a device  
 **⚠️ Note:** Requires Terraform route `POST /devices/{deviceId}/sim/unlink` to be configured  
+
+**Unlink Flow (when needed):**
+1. Call `POST /devices/{deviceId}/sim/unlink`
+2. Verify with `GET /devices/{deviceId}` to confirm LinkedSIM cleared
+3. Optionally verify with `GET /simcards/{simId}` to confirm linkedDeviceId removed
+
 **Request:**
 ```bash
 curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/DEV001/sim/unlink \
@@ -1598,6 +1757,92 @@ curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users
 ---
 
 ## 4. REGIONS API
+
+### GET /regions/hierarchy
+**Description:** Get complete hierarchical location structure for dropdowns (single API call)  
+**Use Case:** Ideal for React/frontend applications that need cascading dropdowns (State → District → Mandal → Village)  
+**Request:**
+```bash
+curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/regions/hierarchy
+```
+
+**Response (200):**
+```json
+{
+  "states": [
+    {
+      "code": "TS",
+      "name": "Telangana"
+    },
+    {
+      "code": "KA",
+      "name": "KARNATAKA"
+    },
+    {
+      "code": "MH",
+      "name": "Maharashtra"
+    }
+  ],
+  "districts": {
+    "TS": [
+      {
+        "code": "HYD",
+        "name": "HYDERABAD"
+      },
+      {
+        "code": "RAN",
+        "name": "RANGAREDDY"
+      }
+    ],
+    "KA": [
+      {
+        "code": "CKB",
+        "name": "Chikbalapura"
+      }
+    ]
+  },
+  "mandals": {
+    "HYD": [
+      {
+        "code": "HYDE",
+        "name": "HYDERABAD"
+      }
+    ],
+    "RAN": [
+      {
+        "code": "ABDU",
+        "name": "ABDULLAPURMET"
+      },
+      {
+        "code": "BALA",
+        "name": "BALAPUR"
+      }
+    ]
+  },
+  "villages": {
+    "HYDE": [
+      {
+        "code": "VIL001",
+        "name": "Sample Village"
+      }
+    ],
+    "BALA": [
+      {
+        "code": "VIL002",
+        "name": "Another Village"
+      }
+    ]
+  }
+}
+```
+
+**Notes:**
+- All arrays sorted alphabetically by name
+- Returns complete hierarchy in single request
+- Efficient for client-side caching
+- Keys are parent region codes (e.g., districts grouped by state code)
+
+---
 
 ### GET /regions
 **Description:** List all regions  

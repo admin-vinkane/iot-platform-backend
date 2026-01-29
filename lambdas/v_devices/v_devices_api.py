@@ -181,11 +181,35 @@ def lambda_handler(event, context):
     if method == "OPTIONS":
         return SuccessResponse.build({"message": "CORS preflight successful"}, 200)
 
-    if method == "POST":
-        # Extract path and path parameters
-        path = event.get("path") or event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or ""
-        path_parameters = event.get("pathParameters") or {}
+    # Extract path and path parameters (needed for all methods)
+    path = event.get("path") or event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or ""
+    path_parameters = event.get("pathParameters") or {}
+    
+    # Check if this is a GET /devices/{deviceId}/repairs request
+    if path_parameters.get("deviceId") and "/repairs" in path and method == "GET":
+        device_id = path_parameters.get("deviceId")
+        logger.info(f"Fetching repairs for device: {device_id}")
         
+        try:
+            response = table.query(
+                KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                ExpressionAttributeValues={
+                    ":pk": f"DEVICE#{device_id}",
+                    ":sk": "REPAIR#"
+                }
+            )
+            repairs = [simplify(item) for item in response.get("Items", [])]
+            logger.info(f"Found {len(repairs)} repair(s) for device {device_id}")
+            return SuccessResponse.build({
+                "deviceId": device_id,
+                "repairCount": len(repairs),
+                "repairs": repairs
+            }, 200)
+        except Exception as e:
+            logger.error(f"Error fetching repairs: {str(e)}")
+            return ErrorResponse.build(f"Error fetching repairs: {str(e)}", 500)
+
+    if method == "POST":
         # Check if this is a /devices/{deviceId}/sim/link request
         if path_parameters.get("deviceId") and "/sim/link" in path:
             device_id = path_parameters.get("deviceId")
@@ -241,10 +265,13 @@ def lambda_handler(event, context):
                 logger.warning(f"SIM validation failed: {error_msg}")
                 return ErrorResponse.build(error_msg, 400)
             
+            # Get device name for history
+            device_name = device_response.get("Item", {}).get("DeviceName", "")
+            
             # Execute atomic transaction
             sim_provider = sim_data.get("provider", "Unknown")
             success, transaction_error = execute_sim_link_transaction(
-                device_id, sim_id, sim_provider, performed_by, ip_address
+                device_id, sim_id, sim_provider, performed_by, ip_address, sim_data, device_name
             )
             
             if not success:
@@ -313,9 +340,21 @@ def lambda_handler(event, context):
                 logger.error(f"Error fetching linked SIM: {str(e)}")
                 return ErrorResponse.build(f"Error fetching linked SIM: {str(e)}", 500)
             
+            # Get SIM and device details for history
+            try:
+                sim_data_response = simcards_table.get_item(
+                    Key={"PK": f"SIMCARD#{sim_id}", "SK": "ENTITY#SIMCARD"}
+                )
+                sim_data = sim_data_response.get("Item", {})
+                device_name = device_response.get("Item", {}).get("DeviceName", "")
+            except Exception as e:
+                logger.error(f"Error fetching SIM/device details: {str(e)}")
+                sim_data = {}
+                device_name = ""
+            
             # Execute atomic transaction
             success, transaction_error = execute_sim_unlink_transaction(
-                device_id, sim_id, performed_by, ip_address
+                device_id, sim_id, performed_by, ip_address, sim_data, device_name
             )
             
             if not success:
@@ -330,6 +369,120 @@ def lambda_handler(event, context):
                 "performedBy": performed_by,
                 "timestamp": datetime.utcnow().isoformat() + "Z"
             }, 200)
+        
+        # Check if this is a POST /devices/{deviceId}/repairs request
+        if path_parameters.get("deviceId") and "/repairs" in path and method == "POST":
+            device_id = path_parameters.get("deviceId")
+            logger.info(f"Creating repair record for device: {device_id}")
+            logger.debug(f"Path: {path}, PathParams: {path_parameters}")
+            
+            try:
+                body = json.loads(event.get("body", "{}"))
+            except Exception as e:
+                logger.error(f"Failed to parse body: {e}")
+                return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
+            
+            # Validate device exists
+            try:
+                device_response = table.get_item(
+                    Key={"PK": f"DEVICE#{device_id}", "SK": "META"}
+                )
+                if "Item" not in device_response:
+                    return ErrorResponse.build(f"Device {device_id} not found", 404)
+            except Exception as e:
+                logger.error(f"Error checking device existence: {str(e)}")
+                return ErrorResponse.build(f"Error validating device: {str(e)}", 500)
+            
+            # Generate repair ID
+            import uuid
+            repair_id = body.get("repairId") or f"REP{str(uuid.uuid4())[:8].upper()}"
+            timestamp = datetime.utcnow().isoformat() + "Z"
+            
+            # Build repair item
+            repair_item = {
+                "PK": f"DEVICE#{device_id}",
+                "SK": f"REPAIR#{repair_id}#{timestamp[:10]}",
+                "EntityType": "REPAIR",
+                "DeviceId": device_id,
+                "RepairId": repair_id,
+                "Description": body.get("description", ""),
+                "Cost": body.get("cost", 0),
+                "Technician": body.get("technician", ""),
+                "Status": body.get("status", "pending"),
+                "CreatedDate": timestamp,
+                "UpdatedDate": timestamp,
+                "CreatedBy": body.get("createdBy", "system"),
+                "UpdatedBy": body.get("createdBy", "system")
+            }
+            
+            try:
+                table.put_item(Item=repair_item)
+                logger.info(f"Created repair {repair_id} for device {device_id}")
+                return SuccessResponse.build({
+                    "message": "Repair record created successfully",
+                    "repair": simplify(repair_item)
+                }, 201)
+            except Exception as e:
+                logger.error(f"Error creating repair: {str(e)}")
+                return ErrorResponse.build(f"Error creating repair: {str(e)}", 500)
+    
+    # Check if this is a PUT /devices/{deviceId}/repairs/{repairId} request
+    if path_parameters.get("deviceId") and path_parameters.get("repairId") and "/repairs" in path and method == "PUT":
+        device_id = path_parameters.get("deviceId")
+        repair_id = path_parameters.get("repairId")
+        logger.info(f"Updating repair {repair_id} for device {device_id}")
+        
+        try:
+            body = json.loads(event.get("body", "{}"))
+        except Exception as e:
+            logger.error(f"Failed to parse body: {e}")
+            return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
+        
+        # Query for the repair record
+        try:
+            response = table.query(
+                KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                ExpressionAttributeValues={
+                    ":pk": f"DEVICE#{device_id}",
+                    ":sk": f"REPAIR#{repair_id}"
+                }
+            )
+            items = response.get("Items", [])
+            if not items:
+                return ErrorResponse.build(f"Repair {repair_id} not found for device {device_id}", 404)
+            
+            repair_item = items[0]
+        except Exception as e:
+            logger.error(f"Error querying repair: {str(e)}")
+            return ErrorResponse.build(f"Error retrieving repair: {str(e)}", 500)
+        
+        # Update allowed fields
+        updatable_fields = {
+            "Description": "description",
+            "Cost": "cost",
+            "Technician": "technician",
+            "Status": "status"
+        }
+        
+        # Apply updates
+        for db_field, request_field in updatable_fields.items():
+            if request_field in body:
+                repair_item[db_field] = body[request_field]
+        
+        # Update metadata
+        repair_item["UpdatedDate"] = datetime.utcnow().isoformat() + "Z"
+        repair_item["UpdatedBy"] = body.get("updatedBy", "system")
+        
+        try:
+            table.put_item(Item=repair_item)
+            logger.info(f"Updated repair {repair_id} for device {device_id}")
+            return SuccessResponse.build({
+                "message": "Repair record updated successfully",
+                "repair": simplify(repair_item)
+            }, 200)
+        except Exception as e:
+            logger.error(f"Error updating repair: {str(e)}")
+            return ErrorResponse.build(f"Error updating repair: {str(e)}", 500)
         
         # Check if this is a /installs/{installId}/devices/link request
         if path_parameters.get("installId") and "/devices/link" in path:
@@ -531,10 +684,11 @@ def lambda_handler(event, context):
         path = event.get("path") or event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or ""
         path_parameters = event.get("pathParameters") or {}
         params = event.get("queryStringParameters") or {}
+        device_id_param = path_parameters.get("deviceId") or path_parameters.get("id")
         
         # Check if this is a /devices/{deviceId}/sim request (no EntityType required)
-        if path_parameters.get("deviceId") and "/sim" in path:
-            device_id = path_parameters.get("deviceId")
+        if device_id_param and "/sim" in path:
+            device_id = device_id_param
             logger.info(f"Fetching linked SIM for device: {device_id}")
             
             # Validate deviceId format
@@ -598,8 +752,8 @@ def lambda_handler(event, context):
                 return ErrorResponse.build(f"Error fetching SIM: {str(e)}", 500)
         
         # Check if this is a /devices/{deviceId}/configs request
-        if path_parameters.get("deviceId") and "/configs" in path:
-            device_id = path_parameters.get("deviceId")
+        if device_id_param and "/configs" in path:
+            device_id = device_id_param
             logger.info(f"Fetching configs for device: {device_id}")
             
             # Validate deviceId format
@@ -683,6 +837,77 @@ def lambda_handler(event, context):
             except Exception as e:
                 logger.error(f"Unexpected error: {str(e)}")
                 return ErrorResponse.build(f"Error: {str(e)}", 500)
+
+
+        def handle_get_device(device_id: str):
+            """Fetch a single device with repair history and linked SIM details."""
+            # Validate deviceId format
+            if not device_id or not re.match(r"^[A-Za-z0-9_-]{1,64}$", device_id):
+                return ErrorResponse.build("Invalid deviceId format. Must be alphanumeric with optional _ or - (1-64 chars)", 400)
+
+            try:
+                device_response = table.get_item(Key={"PK": f"DEVICE#{device_id}", "SK": "META"})
+                if "Item" not in device_response:
+                    return ErrorResponse.build(f"Device {device_id} not found", 404)
+
+                item = device_response["Item"]
+
+                # Repair history
+                try:
+                    repair_response = table.query(
+                        KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                        ExpressionAttributeValues={
+                            ":pk": f"DEVICE#{device_id}",
+                            ":sk": "REPAIR#"
+                        }
+                    )
+                    item["RepairHistory"] = [simplify(r) for r in repair_response.get("Items", [])]
+                except Exception as e:
+                    logger.error(f"Error fetching repair history for {device_id}: {str(e)}")
+                    item["RepairHistory"] = []
+
+                # Linked SIM data
+                try:
+                    sim_response = table.query(
+                        KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                        ExpressionAttributeValues={
+                            ":pk": f"DEVICE#{device_id}",
+                            ":sk": "SIM_ASSOC#"
+                        }
+                    )
+                    sim_items = sim_response.get("Items", [])
+                    if sim_items:
+                        sim_assoc = sim_items[0]
+                        sim_id = sim_assoc.get("SIMId")
+                        if sim_id:
+                            success, sim_data, error_msg = fetch_sim_details(sim_id)
+                            if success:
+                                item["LinkedSIM"] = {
+                                    "simId": sim_id,
+                                    "linkedDate": sim_assoc.get("CreatedDate"),
+                                    "linkStatus": sim_assoc.get("Status"),
+                                    "simDetails": sim_data
+                                }
+                            else:
+                                logger.warning(f"Failed to fetch SIM details for {sim_id}: {error_msg}")
+                                item["LinkedSIM"] = None
+                        else:
+                            item["LinkedSIM"] = None
+                    else:
+                        # Fallback to existing field if present in META
+                        item["LinkedSIM"] = item.get("LinkedSIM")
+                except Exception as e:
+                    logger.error(f"Error fetching SIM association for {device_id}: {str(e)}")
+                    item["LinkedSIM"] = None
+
+                return SuccessResponse.build(simplify(item))
+
+            except ClientError as e:
+                logger.error(f"Database error: {str(e)}")
+                return ErrorResponse.build(f"Database error: {e.response['Error']['Message']}", 500)
+            except Exception as e:
+                logger.error(f"Unexpected error: {str(e)}")
+                return ErrorResponse.build(f"Error fetching device: {str(e)}", 500)
         
         # Check if this is a /devices/{deviceId}/install request
         if path_parameters.get("deviceId") and "/install" in path:
@@ -777,6 +1002,10 @@ def lambda_handler(event, context):
                 logger.error(f"Unexpected error: {str(e)}")
                 return ErrorResponse.build(f"Error: {str(e)}", 500)
         
+        # GET /devices/{deviceId}
+        if device_id_param:
+            return handle_get_device(device_id_param)
+
         # Default: GET /devices - list all devices with optional filters
         # EntityType defaults to "DEVICE" if not provided for backward compatibility
         device_type = params.get("DeviceType")
@@ -861,7 +1090,8 @@ def lambda_handler(event, context):
                             else:
                                 item["LinkedSIM"] = None
                         else:
-                            item["LinkedSIM"] = None
+                            # Fallback to existing field if present in META
+                            item["LinkedSIM"] = item.get("LinkedSIM")
                     except Exception as e:
                         logger.error(f"Error fetching linked SIM for {device_id}: {str(e)}")
                         item["LinkedSIM"] = None
@@ -898,16 +1128,43 @@ def lambda_handler(event, context):
         if not pk or not sk:
             return ErrorResponse.build("Could not derive PK/SK for update", 400)
 
+        # Fetch existing item to track changes
+        existing_item = None
+        try:
+            response = table.get_item(Key={"PK": pk, "SK": sk})
+            existing_item = response.get("Item")
+            if not existing_item:
+                return ErrorResponse.build(f"Item not found: PK={pk}, SK={sk}", 404)
+        except Exception as e:
+            logger.error(f"Error fetching existing item: {str(e)}")
+            return ErrorResponse.build(f"Error fetching item: {str(e)}", 500)
+
         # Set UpdatedDate and UpdatedBy
-        item["UpdatedDate"] = datetime.utcnow().isoformat() + "Z"
+        timestamp = datetime.utcnow().isoformat() + "Z"
+        item["UpdatedDate"] = timestamp
         if item.get("CreatedBy") and not item.get("UpdatedBy"):
             item["UpdatedBy"] = item["CreatedBy"]
+
+        # Track changes for device records only
+        changes = {}
+        trackable_fields = ["DeviceName", "DeviceType", "SerialNumber", "Status", "Location"]
+        
+        if entity_type == "DEVICE":
+            for field in trackable_fields:
+                old_value = existing_item.get(field)
+                new_value = item.get(field)
+                # Only track if field is being updated and value changed
+                if field in item and old_value != new_value:
+                    changes[field] = {
+                        "from": old_value,
+                        "to": new_value
+                    }
 
         # Remove PK and SK from update fields
         update_fields = {k: v for k, v in item.items() if k not in ["PK", "SK"]}
 
         # Build UpdateExpression and ExpressionAttributeValues
-        reserved_keywords = {"Status", "Location"}  # <-- Add Location here
+        reserved_keywords = {"Status", "Location"}
         update_expr_parts = []
         expr_attr_names = {}
         expr_attr_vals = {}
@@ -920,17 +1177,34 @@ def lambda_handler(event, context):
                 update_expr_parts.append(f"{k} = :{k}")
             expr_attr_vals[f":{k}"] = v
 
+        # Add changeHistory if there are changes
+        if changes:
+            history_entry = {
+                "timestamp": timestamp,
+                "action": "UPDATE",
+                "changes": changes,
+                "updatedBy": item.get("UpdatedBy", "system")
+            }
+            
+            # Append to changeHistory array
+            update_expr_parts.append("changeHistory = list_append(if_not_exists(changeHistory, :empty_list), :new_history)")
+            expr_attr_vals[":empty_list"] = []
+            expr_attr_vals[":new_history"] = [history_entry]
+            
+            logger.info(f"Recording device changes: {changes}")
+
         update_expr = "SET " + ", ".join(update_expr_parts)
 
         try:
-            table.update_item(
+            result = table.update_item(
                 Key={"PK": pk, "SK": sk},
                 UpdateExpression=update_expr,
                 ExpressionAttributeValues=expr_attr_vals,
                 ExpressionAttributeNames=expr_attr_names if expr_attr_names else None,
                 ReturnValues="ALL_NEW"
             )
-            return SuccessResponse.build({"updated": item})
+            updated_item = result.get("Attributes", {})
+            return SuccessResponse.build({"updated": simplify(updated_item)})
         except Exception as e:
             logger.error(f"Update error: {str(e)}")
             return ErrorResponse.build(f"Update error: {str(e)}", 500)
@@ -1194,12 +1468,17 @@ def validate_sim_available(sim_id):
         logger.error(f"Unexpected error validating SIM {sim_id}: {str(e)}")
         return False, f"Unexpected error: {str(e)}", None
 
-def execute_sim_link_transaction(device_id, sim_id, sim_provider, performed_by, ip_address):
+def execute_sim_link_transaction(device_id, sim_id, sim_provider, performed_by, ip_address, sim_data=None, device_name=None):
     """
     Execute atomic transaction to link SIM to device across both tables.
     Creates SIM_ASSOC in devices table and updates linkedDeviceId in simcards table.
+    Also adds SIM history to device record for persistent audit trail.
     """
     timestamp = datetime.utcnow().isoformat() + "Z"
+    
+    # Extract SIM details for history
+    sim_mobile = sim_data.get("mobileNumber", "") if sim_data else ""
+    sim_card_number = sim_data.get("simCardNumber", "") if sim_data else ""
     
     try:
         # Prepare transaction items
@@ -1222,7 +1501,7 @@ def execute_sim_link_transaction(device_id, sim_id, sim_provider, performed_by, 
                 }
             },
             {
-                # Update SIM card in simcards table
+                # Update SIM card in simcards table with enhanced history
                 "Update": {
                     "TableName": SIMCARDS_TABLE_NAME,
                     "Key": {
@@ -1241,6 +1520,40 @@ def execute_sim_link_transaction(device_id, sim_id, sim_provider, performed_by, 
                                         "timestamp": {"S": timestamp},
                                         "action": {"S": "linked"},
                                         "deviceId": {"S": device_id},
+                                        "deviceName": {"S": device_name or ""},
+                                        "simId": {"S": sim_id},
+                                        "mobileNumber": {"S": sim_mobile},
+                                        "simCardNumber": {"S": sim_card_number},
+                                        "performedBy": {"S": performed_by},
+                                        "ipAddress": {"S": ip_address}
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            {
+                # Add SIM history to device record for persistent audit trail
+                "Update": {
+                    "TableName": TABLE_NAME,
+                    "Key": {
+                        "PK": {"S": f"DEVICE#{device_id}"},
+                        "SK": {"S": "META"}
+                    },
+                    "UpdateExpression": "SET SIMHistory = list_append(if_not_exists(SIMHistory, :empty_list), :sim_history)",
+                    "ExpressionAttributeValues": {
+                        ":empty_list": {"L": []},
+                        ":sim_history": {
+                            "L": [
+                                {
+                                    "M": {
+                                        "timestamp": {"S": timestamp},
+                                        "action": {"S": "linked"},
+                                        "simId": {"S": sim_id},
+                                        "mobileNumber": {"S": sim_mobile},
+                                        "simCardNumber": {"S": sim_card_number},
+                                        "provider": {"S": sim_provider},
                                         "performedBy": {"S": performed_by},
                                         "ipAddress": {"S": ip_address}
                                     }
@@ -1269,12 +1582,18 @@ def execute_sim_link_transaction(device_id, sim_id, sim_provider, performed_by, 
         logger.error(f"Unexpected error in link transaction: {str(e)}")
         return False, f"Unexpected error: {str(e)}"
 
-def execute_sim_unlink_transaction(device_id, sim_id, performed_by, ip_address):
+def execute_sim_unlink_transaction(device_id, sim_id, performed_by, ip_address, sim_data=None, device_name=None):
     """
     Execute atomic transaction to unlink SIM from device across both tables.
     Deletes SIM_ASSOC from devices table and clears linkedDeviceId in simcards table.
+    Also adds unlink event to device SIMHistory for persistent audit trail.
     """
     timestamp = datetime.utcnow().isoformat() + "Z"
+    
+    # Extract SIM details for history
+    sim_mobile = sim_data.get("mobileNumber", "") if sim_data else ""
+    sim_card_number = sim_data.get("simCardNumber", "") if sim_data else ""
+    sim_provider = sim_data.get("provider", "") if sim_data else ""
     
     try:
         # Prepare transaction items
@@ -1290,7 +1609,7 @@ def execute_sim_unlink_transaction(device_id, sim_id, performed_by, ip_address):
                 }
             },
             {
-                # Update SIM card in simcards table
+                # Update SIM card in simcards table with enhanced history
                 "Update": {
                     "TableName": SIMCARDS_TABLE_NAME,
                     "Key": {
@@ -1308,6 +1627,40 @@ def execute_sim_unlink_transaction(device_id, sim_id, performed_by, ip_address):
                                         "timestamp": {"S": timestamp},
                                         "action": {"S": "unlinked"},
                                         "deviceId": {"S": device_id},
+                                        "deviceName": {"S": device_name or ""},
+                                        "simId": {"S": sim_id},
+                                        "mobileNumber": {"S": sim_mobile},
+                                        "simCardNumber": {"S": sim_card_number},
+                                        "performedBy": {"S": performed_by},
+                                        "ipAddress": {"S": ip_address}
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            {
+                # Add unlink event to device SIMHistory
+                "Update": {
+                    "TableName": TABLE_NAME,
+                    "Key": {
+                        "PK": {"S": f"DEVICE#{device_id}"},
+                        "SK": {"S": "META"}
+                    },
+                    "UpdateExpression": "SET SIMHistory = list_append(if_not_exists(SIMHistory, :empty_list), :sim_history)",
+                    "ExpressionAttributeValues": {
+                        ":empty_list": {"L": []},
+                        ":sim_history": {
+                            "L": [
+                                {
+                                    "M": {
+                                        "timestamp": {"S": timestamp},
+                                        "action": {"S": "unlinked"},
+                                        "simId": {"S": sim_id},
+                                        "mobileNumber": {"S": sim_mobile},
+                                        "simCardNumber": {"S": sim_card_number},
+                                        "provider": {"S": sim_provider},
                                         "performedBy": {"S": performed_by},
                                         "ipAddress": {"S": ip_address}
                                     }

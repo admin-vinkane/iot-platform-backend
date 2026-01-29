@@ -1,0 +1,8 @@
+{
+  "httpMethod": "POST",
+  "path": "/devices",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"EntityType\":\"CONFIG\",\"DeviceId\":\"DEV001\",\"ConfigVersion\":\"V1.0\",\"ConfigData\":{\"test\":true},\"AppliedBy\":\"admin\",\"Status\":\"ACTIVE\"}"
+}

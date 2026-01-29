@@ -1,0 +1,11 @@
+{
+  "httpMethod": "POST",
+  "path": "/surveys/SRV8FADA373/submit",
+  "pathParameters": {
+    "surveyId": "SRV8FADA373"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{}"
+}

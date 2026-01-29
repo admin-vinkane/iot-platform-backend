@@ -1,0 +1,8 @@
+{
+  "httpMethod": "POST",
+  "path": "/surveys",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"SurveyorName\":\"Rajesh Kumar\",\"SurveyorPhone\":\"9876543210\",\"SurveyorEmail\":\"rajesh.kumar@example.com\",\"SurveyDate\":\"2026-01-20\",\"State\":\"Telangana\",\"District\":\"Hyderabad\",\"Mandal\":\"Medchal\",\"Village\":\"Alwal\",\"Habitation\":\"Alwal - North Zone\",\"Latitude\":13.035635405504586,\"Longitude\":77.69055741651376,\"TankCapacity\":{\"value\":20000,\"unit\":\"litres\"},\"TankHeight\":{\"value\":9.75,\"unit\":\"meters\"},\"TankToMotorDistance\":{\"value\":3,\"unit\":\"meters\"},\"TankMaterial\":\"RCC\",\"TankCondition\":\"good\",\"MotorCapacity\":{\"value\":7.5,\"unit\":\"HP\"},\"MotorPhaseType\":\"3_phase\",\"MotorManufacturer\":\"Kirloskar\",\"MotorWorkingCondition\":\"working\",\"StarterType\":\"Star_Delta\",\"StarterWorkingCondition\":\"working\",\"PowerSupplyAtTank\":\"available\",\"PowerSupplySource\":\"grid\",\"Voltage\":415,\"ConnectionType\":\"wireless\",\"PowerQuality\":\"stable\",\"ChlorineSystemAvailable\":true,\"SiteStatus\":\"ready_for_installation\",\"CreatedBy\":\"SYSTEM\"}"
+}

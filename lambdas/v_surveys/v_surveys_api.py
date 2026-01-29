@@ -4,6 +4,8 @@ import boto3
 import logging
 import re
 import uuid
+import base64
+import io
 from datetime import datetime
 from decimal import Decimal
 import decimal
@@ -11,6 +13,9 @@ from pydantic import BaseModel, ValidationError, Field
 from botocore.exceptions import ClientError
 from typing import Optional, Dict, Any, List
 from shared.response_utils import SuccessResponse, ErrorResponse
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 
 TABLE_NAME = os.environ.get("TABLE_NAME", "v_surveys_dev")
 REGIONS_TABLE_NAME = os.environ.get("REGIONS_TABLE_NAME", "v_regions_dev")
@@ -125,6 +130,10 @@ class SurveyImage(BaseModel):
     UploadedDate: str
     FileSize: Optional[int] = None
     MimeType: Optional[str] = None
+    DriveFileId: Optional[str] = None
+    DriveWebViewLink: Optional[str] = None
+    DriveWebContentLink: Optional[str] = None
+    StorageProvider: Optional[str] = None
     
     class Config:
         extra = "forbid"
@@ -155,40 +164,49 @@ def lambda_handler(event, context):
     params = event.get("queryStringParameters") or {}
     
     if method == "POST":
-        # POST /surveys/{surveyId}/submit
-        if path_parameters.get("surveyId") and "/submit" in path:
-            return handle_submit_survey(path_parameters.get("surveyId"), event)
+        # POST /surveys/{surveyId}/submit or /surveys/{id}/submit
+        survey_id = path_parameters.get("surveyId") or path_parameters.get("id")
+        if survey_id and "/submit" in path:
+            return handle_submit_survey(survey_id, event)
+
+        # POST /surveys/{surveyId}/drive-images or /surveys/{id}/drive-images
+        if survey_id and "/drive-images" in path:
+            return handle_upload_image_drive(survey_id, event)
         
-        # POST /surveys/{surveyId}/images
-        if path_parameters.get("surveyId") and "/images" in path:
-            return handle_upload_image(path_parameters.get("surveyId"), event)
+        # POST /surveys/{surveyId}/images or /surveys/{id}/images
+        if survey_id and "/images" in path:
+            return handle_upload_image(survey_id, event)
         
         # POST /surveys - Create new survey
         return handle_create_survey(event)
     
     elif method == "GET":
-        # GET /surveys/{surveyId}
-        if path_parameters.get("surveyId"):
-            return handle_get_survey(path_parameters.get("surveyId"))
+        # GET /surveys/{surveyId} or /surveys/{id}
+        survey_id = path_parameters.get("surveyId") or path_parameters.get("id")
+        if survey_id:
+            return handle_get_survey(survey_id)
         
         # GET /surveys - List surveys
         return handle_list_surveys(params)
     
     elif method == "PUT":
-        # PUT /surveys/{surveyId}
-        if path_parameters.get("surveyId"):
-            return handle_update_survey(path_parameters.get("surveyId"), event)
+        # PUT /surveys/{surveyId} or /surveys/{id}
+        survey_id = path_parameters.get("surveyId") or path_parameters.get("id")
+        if survey_id:
+            return handle_update_survey(survey_id, event)
         
         return ErrorResponse.build("Survey ID required for update", 400)
     
     elif method == "DELETE":
-        # DELETE /surveys/{surveyId}/images/{imageId}
-        if path_parameters.get("surveyId") and path_parameters.get("imageId"):
-            return handle_delete_image(path_parameters.get("surveyId"), path_parameters.get("imageId"))
+        # DELETE /surveys/{surveyId}/images/{imageId} or /surveys/{id}/images/{imageId}
+        survey_id = path_parameters.get("surveyId") or path_parameters.get("id")
+        image_id = path_parameters.get("imageId")
+        if survey_id and image_id:
+            return handle_delete_image(survey_id, image_id)
         
-        # DELETE /surveys/{surveyId}
-        if path_parameters.get("surveyId"):
-            return handle_delete_survey(path_parameters.get("surveyId"))
+        # DELETE /surveys/{surveyId} or /surveys/{id}
+        if survey_id:
+            return handle_delete_survey(survey_id)
         
         return ErrorResponse.build("Survey ID required for delete", 400)
 
@@ -566,8 +584,136 @@ def handle_submit_survey(survey_id, event):
         logger.error(f"Submit error: {str(e)}")
         return ErrorResponse.build(f"Submit error: {str(e)}", 500)
 
+def handle_upload_image_drive(survey_id, event):
+    """Upload an image to Google Drive and store metadata in DynamoDB."""
+    try:
+        body = json.loads(event.get("body", "{}"))
+    except Exception as e:
+        logger.error(f"Failed to parse body: {e}")
+        return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
+    
+    # Check if survey exists
+    try:
+        response = table.get_item(
+            Key={
+                "PK": f"SURVEY#{survey_id}",
+                "SK": "META"
+            }
+        )
+        
+        if "Item" not in response:
+            return ErrorResponse.build(f"Survey {survey_id} not found", 404)
+    
+    except ClientError as e:
+        logger.error(f"Database error: {str(e)}")
+        return ErrorResponse.build(f"Database error: {e.response['Error']['Message']}", 500)
+
+    image_id = f"IMG{str(uuid.uuid4())[:8].upper()}"
+    filename = body.get("filename", "image.jpg")
+    content_type = body.get("contentType", "image/jpeg")
+    description = body.get("description", "")
+    file_b64 = body.get("fileBase64") or body.get("fileContentBase64")
+
+    if not file_b64:
+        return ErrorResponse.build("fileBase64 is required for Drive upload", 400)
+    
+    try:
+        file_bytes = base64.b64decode(file_b64)
+    except Exception as e:
+        logger.error(f"Base64 decode failed: {e}")
+        return ErrorResponse.build("Invalid base64 file content", 400)
+
+    file_size = len(file_bytes)
+    if file_size > 5 * 1024 * 1024:
+        return ErrorResponse.build("File size exceeds 5MB limit", 400)
+
+    # Check image count (max 10 per survey)
+    try:
+        images_response = table.query(
+            KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+            ExpressionAttributeValues={
+                ":pk": f"SURVEY#{survey_id}",
+                ":sk": "IMAGE#"
+            },
+            Select="COUNT"
+        )
+        
+        if images_response.get("Count", 0) >= 10:
+            return ErrorResponse.build("Maximum 10 images per survey", 400)
+    
+    except ClientError as e:
+        logger.error(f"Database error: {str(e)}")
+        return ErrorResponse.build(f"Database error: {e.response['Error']['Message']}", 500)
+
+    try:
+        drive_service = get_drive_service()
+    except Exception as e:
+        logger.error(f"Drive auth error: {e}")
+        return ErrorResponse.build(f"Drive authentication error: {str(e)}", 500)
+
+    drive_parent = os.environ.get("GDRIVE_PARENT_FOLDER_ID")
+    file_metadata = {
+        "name": f"{survey_id}_{filename}"
+    }
+    if drive_parent:
+        file_metadata["parents"] = [drive_parent]
+
+    media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=content_type, resumable=False)
+
+    try:
+        drive_file = drive_service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields="id, webViewLink, webContentLink, size, mimeType"
+        ).execute()
+
+        if os.environ.get("GDRIVE_PUBLIC_LINKS", "true").lower() == "true":
+            try:
+                drive_service.permissions().create(
+                    fileId=drive_file.get("id"),
+                    body={"role": "reader", "type": "anyone"}
+                ).execute()
+            except Exception as perm_error:
+                logger.warning(f"Failed to set public permission: {perm_error}")
+        
+        timestamp = datetime.utcnow().isoformat() + "Z"
+        image_record = {
+            "PK": f"SURVEY#{survey_id}",
+            "SK": f"IMAGE#{image_id}",
+            "EntityType": "SURVEY_IMAGE",
+            "ImageId": image_id,
+            "ImageUrl": drive_file.get("webContentLink") or drive_file.get("webViewLink"),
+            "Description": description,
+            "UploadedDate": timestamp,
+            "FileSize": file_size,
+            "MimeType": content_type,
+            "DriveFileId": drive_file.get("id"),
+            "DriveWebViewLink": drive_file.get("webViewLink"),
+            "DriveWebContentLink": drive_file.get("webContentLink"),
+            "StorageProvider": "gdrive"
+        }
+        
+        table.put_item(Item=image_record)
+        
+        logger.info(f"Uploaded image {image_id} for survey {survey_id} to Google Drive")
+        
+        return SuccessResponse.build({
+            "imageId": image_id,
+            "driveFileId": drive_file.get("id"),
+            "driveWebViewLink": drive_file.get("webViewLink"),
+            "driveWebContentLink": drive_file.get("webContentLink"),
+            "imageRecord": simplify(image_record)
+        })
+
+    except ClientError as e:
+        logger.error(f"Database error: {str(e)}")
+        return ErrorResponse.build(f"Database error: {e.response['Error']['Message']}", 500)
+    except Exception as e:
+        logger.error(f"Drive upload error: {str(e)}")
+        return ErrorResponse.build(f"Drive upload error: {str(e)}", 500)
+
 def handle_upload_image(survey_id, event):
-    """Generate pre-signed URL for image upload"""
+    """Generate pre-signed URL for image upload to S3"""
     try:
         body = json.loads(event.get("body", "{}"))
     except Exception as e:
@@ -646,7 +792,8 @@ def handle_upload_image(survey_id, event):
             "Description": description,
             "UploadedDate": timestamp,
             "FileSize": file_size,
-            "MimeType": content_type
+            "MimeType": content_type,
+            "StorageProvider": "s3"
         }
         
         table.put_item(Item=image_record)
@@ -735,3 +882,19 @@ def simplify(item):
         return v
     
     return {k: simplify_value(v) for k, v in item.items()}
+
+
+def get_drive_service():
+    """Build and return a Google Drive service client using service account credentials."""
+    secret_b64 = os.environ.get("GDRIVE_SERVICE_ACCOUNT_JSON_B64")
+    if not secret_b64:
+        raise ValueError("GDRIVE_SERVICE_ACCOUNT_JSON_B64 not set")
+
+    try:
+        cred_dict = json.loads(base64.b64decode(secret_b64))
+    except Exception as e:
+        raise ValueError(f"Invalid service account secret: {e}")
+
+    scopes = ["https://www.googleapis.com/auth/drive.file"]
+    creds = Credentials.from_service_account_info(cred_dict, scopes=scopes)
+    return build("drive", "v3", credentials=creds, cache_discovery=False)

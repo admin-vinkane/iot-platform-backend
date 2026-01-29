@@ -1,0 +1,11 @@
+{
+  "httpMethod": "PUT",
+  "path": "/users/user123",
+  "pathParameters": {
+    "id": "user123"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"id\":\"user123\",\"PK\":\"USER#user123\",\"SK\":\"ENTITY#USER\",\"keycloakId\":\"kc123\",\"email\":\"testuser@example.com\",\"firstName\":\"Test Updated\",\"lastName\":\"User\",\"name\":\"Test Updated User\",\"role\":\"admin\",\"isActive\":true,\"emailVerified\":true,\"createdAt\":\"2026-01-21T10:00:00Z\",\"updatedAt\":\"2026-01-21T10:00:00Z\",\"createdBy\":\"admin@example.com\"}"
+}

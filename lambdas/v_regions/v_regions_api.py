@@ -244,10 +244,22 @@ def lambda_handler(event, context):
     if method == "OPTIONS":
         return SuccessResponse.build({"message": "CORS preflight successful"}, 200)
     
-    path = event.get("path", "")
+    # Handle both v1.0 (REST API) and v2.0 (HTTP API) formats
+    path = event.get("path") or event.get("rawPath", "")
     query_params = event.get("queryStringParameters") or {}
+    
+    logger.info(f"Path received: '{path}'")
+    logger.info(f"Query params: {query_params}")
 
     try:
+        # Special route for hierarchy endpoint - must be checked first
+        if "/hierarchy" in path:
+            logger.info("Hierarchy endpoint matched")
+            if method == "GET":
+                return handle_get_hierarchy()
+            else:
+                return ErrorResponse.build("Method not allowed for hierarchy endpoint", 405)
+        
         if method == "POST":
             try:
                 body = json.loads(event.get("body", "{}"))
@@ -887,3 +899,94 @@ def lambda_handler(event, context):
     except Exception as e:
         logger.error(f"Unhandled exception: {e}")
         return ErrorResponse.build("Internal server error", 500)
+
+
+def handle_get_hierarchy():
+    """
+    Get complete hierarchical location structure for dropdowns.
+    Returns nested structure: states -> districts -> mandals -> villages
+    """
+    try:
+        logger.info("Fetching complete region hierarchy")
+        
+        # Scan all regions
+        response = table.scan()
+        items = response.get('Items', [])
+        
+        # Handle pagination if needed
+        while 'LastEvaluatedKey' in response:
+            response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
+            items.extend(response.get('Items', []))
+        
+        logger.info(f"Scanned {len(items)} total region items")
+        
+        # Organize by type
+        states = []
+        districts_by_state = {}
+        mandals_by_district = {}
+        villages_by_mandal = {}
+        
+        for item in items:
+            item = simplify(item)
+            region_type = item.get('RegionType')
+            
+            if not region_type:
+                continue
+            
+            if region_type == 'STATE':
+                states.append({
+                    'code': item.get('RegionCode'),
+                    'name': item.get('RegionName')
+                })
+            elif region_type == 'DISTRICT':
+                state_code = item.get('StateCode')
+                if state_code:
+                    if state_code not in districts_by_state:
+                        districts_by_state[state_code] = []
+                    districts_by_state[state_code].append({
+                        'code': item.get('RegionCode'),
+                        'name': item.get('RegionName')
+                    })
+            elif region_type == 'MANDAL':
+                district_code = item.get('DistrictCode')
+                if district_code:
+                    if district_code not in mandals_by_district:
+                        mandals_by_district[district_code] = []
+                    mandals_by_district[district_code].append({
+                        'code': item.get('RegionCode'),
+                        'name': item.get('RegionName')
+                    })
+            elif region_type == 'VILLAGE':
+                mandal_code = item.get('MandalCode')
+                if mandal_code:
+                    if mandal_code not in villages_by_mandal:
+                        villages_by_mandal[mandal_code] = []
+                    villages_by_mandal[mandal_code].append({
+                        'code': item.get('RegionCode'),
+                        'name': item.get('RegionName')
+                    })
+        
+        # Sort all arrays alphabetically by name
+        states.sort(key=lambda x: x['name'])
+        for state_code in districts_by_state:
+            districts_by_state[state_code].sort(key=lambda x: x['name'])
+        for district_code in mandals_by_district:
+            mandals_by_district[district_code].sort(key=lambda x: x['name'])
+        for mandal_code in villages_by_mandal:
+            villages_by_mandal[mandal_code].sort(key=lambda x: x['name'])
+        
+        hierarchy = {
+            'states': states,
+            'districts': districts_by_state,
+            'mandals': mandals_by_district,
+            'villages': villages_by_mandal
+        }
+        
+        logger.info(f"Hierarchy built: {len(states)} states, {len(districts_by_state)} district groups, "
+                   f"{len(mandals_by_district)} mandal groups, {len(villages_by_mandal)} village groups")
+        
+        return SuccessResponse.build(hierarchy)
+        
+    except Exception as e:
+        logger.error(f"Hierarchy error: {str(e)}")
+        return ErrorResponse.build(f"Error fetching hierarchy: {str(e)}", 500)
