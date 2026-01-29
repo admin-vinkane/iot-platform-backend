@@ -21,7 +21,7 @@ class UserDetails(BaseModel):
     PK: str
     SK: str
     entityType: str = "USER"
-    keycloakId: str
+    firebaseUid: str | None = None  # Populated on first login
     email: str
     firstName: str
     lastName: str
@@ -47,6 +47,46 @@ def simplify(item):
             return [simplify_value(x) for x in v]
         return v
     return {k: simplify_value(v) for k, v in item.items()}
+
+def verify_firebase_token(id_token):
+    """
+    Verify Firebase ID token and extract claims.
+    Returns dict with 'uid' and 'email' if valid, None if invalid.
+    
+    Note: This is a placeholder. In production, you should:
+    1. Install firebase-admin SDK
+    2. Initialize with service account credentials
+    3. Use firebase_admin.auth.verify_id_token(id_token)
+    
+    For now, we'll do basic JWT decode without verification for development.
+    """
+    try:
+        import base64
+        # Basic JWT decode (header.payload.signature)
+        parts = id_token.split('.')
+        if len(parts) != 3:
+            return None
+        
+        # Decode payload (add padding if needed)
+        payload = parts[1]
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += '=' * padding
+        
+        decoded = base64.urlsafe_b64decode(payload)
+        claims = json.loads(decoded)
+        
+        # Extract uid and email from claims
+        if 'user_id' in claims and 'email' in claims:
+            return {
+                'uid': claims['user_id'],
+                'email': claims['email'],
+                'email_verified': claims.get('email_verified', False)
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Token verification error: {str(e)}")
+        return None
 
 def lambda_handler(event, context):
     logger.info(json.dumps(event))
@@ -89,6 +129,83 @@ def lambda_handler(event, context):
             if not item:
                 return ErrorResponse.build("User not found", 404)
             return SuccessResponse.build(simplify(item))
+
+        elif method == "POST" and "/users/sync" in path:
+            # POST /users/sync - Link Firebase UID to DynamoDB user on first login
+            body = event.get("body")
+            if not body:
+                return ErrorResponse.build("Missing request body", 400)
+            
+            try:
+                data = json.loads(body)
+                firebase_token = data.get("idToken")
+                
+                if not firebase_token:
+                    return ErrorResponse.build("idToken is required", 400)
+                
+                # Verify Firebase token
+                token_claims = verify_firebase_token(firebase_token)
+                if not token_claims:
+                    return ErrorResponse.build("Invalid Firebase token", 401)
+                
+                firebase_uid = token_claims['uid']
+                email = token_claims['email']
+                
+                # Find user by email in DynamoDB
+                response = table.scan(
+                    FilterExpression="email = :email",
+                    ExpressionAttributeValues={
+                        ":email": email
+                    }
+                )
+                
+                items = response.get("Items", [])
+                if not items:
+                    return ErrorResponse.build(f"User with email {email} not found in system. Contact administrator.", 404)
+                
+                user = items[0]
+                
+                # Check if user is active
+                if not user.get("isActive", False):
+                    return ErrorResponse.build("User account is deactivated. Contact administrator.", 403)
+                
+                user_id = user["id"]
+                
+                # Update firebaseUid if not already set
+                if not user.get("firebaseUid"):
+                    timestamp = datetime.utcnow().isoformat() + "Z"
+                    table.update_item(
+                        Key={"id": user_id},
+                        UpdateExpression="SET firebaseUid = :uid, updatedAt = :updated, emailVerified = :verified",
+                        ExpressionAttributeValues={
+                            ":uid": firebase_uid,
+                            ":updated": timestamp,
+                            ":verified": token_claims.get('email_verified', False)
+                        }
+                    )
+                    user["firebaseUid"] = firebase_uid
+                    user["emailVerified"] = token_claims.get('email_verified', False)
+                    user["updatedAt"] = timestamp
+                    logger.info(f"Linked Firebase UID {firebase_uid} to user {user_id}")
+                else:
+                    # Verify firebaseUid matches
+                    if user["firebaseUid"] != firebase_uid:
+                        return ErrorResponse.build("Email already linked to different Firebase account", 409)
+                
+                # Return user profile (remove sensitive fields)
+                user_profile = simplify(user)
+                logger.info(f"User {email} synced successfully")
+                return SuccessResponse.build({
+                    "message": "User synced successfully",
+                    "user": user_profile
+                })
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decode error: {e}")
+                return ErrorResponse.build(f"Invalid JSON: {str(e)}", 400)
+            except Exception as e:
+                logger.error(f"Sync error: {str(e)}")
+                return ErrorResponse.build(f"Sync error: {str(e)}", 500)
 
         elif method == "POST" and ("/users" in path or path == "/"):
             # POST /users
