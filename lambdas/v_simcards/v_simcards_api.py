@@ -4,6 +4,8 @@ import boto3
 import logging
 from decimal import Decimal
 from pydantic import BaseModel, ValidationError, Field
+from shared.response_utils import SuccessResponse, ErrorResponse
+from shared.encryption_utils import prepare_item_for_storage, prepare_item_for_response
 
 # DynamoDB setup
 TABLE_NAME = os.environ.get("TABLE_NAME", "v_simcards_dev")
@@ -81,6 +83,7 @@ def lambda_handler(event, context):
     # Extract path (HTTP API 2.0 uses rawPath, REST API uses path)
     path = event.get("path") or event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or ""
     path_parameters = event.get("pathParameters") or {}
+    query_parameters = event.get("queryStringParameters") or {}
 
     # Log for debugging
     logger.info(f"Extracted method: {method}, path: {path}, pathParameters: {path_parameters}")
@@ -94,13 +97,19 @@ def lambda_handler(event, context):
         return build_response({"message": "CORS preflight successful"}, 200)
 
     try:
+        if query_parameters and "decrypt" in query_parameters:
+            should_decrypt = query_parameters.get("decrypt", "").lower() == "true"
+        else:
+            should_decrypt = True
+        
         # ----------------------------
         # GET /simcards
         # ----------------------------
         if method == "GET" and not path_parameters:
             response = table.scan()
             items = response.get("Items", [])
-            return build_response([simplify(item) for item in items])
+            items = [simplify(prepare_item_for_response(item, "SIM", decrypt=should_decrypt)) for item in items]
+            return build_response(items)
 
         # ----------------------------
         # GET /simcards/{id}
@@ -116,6 +125,7 @@ def lambda_handler(event, context):
             if not item:
                 return build_response({"error": "SIM card not found"}, 404)
 
+            item = prepare_item_for_response(item, "SIM", decrypt=should_decrypt)
             return build_response(simplify(item))
 
         # ----------------------------
@@ -149,7 +159,9 @@ def lambda_handler(event, context):
             if item.get("createdBy") and not item.get("updatedBy"):
                 item["updatedBy"] = item["createdBy"]
 
+            item = prepare_item_for_storage(item, "SIM")
             table.put_item(Item=item)
+            item = prepare_item_for_response(item, "SIM", decrypt=True)
             return build_response(simplify(item), 201)
 
         # ----------------------------
@@ -222,7 +234,9 @@ def lambda_handler(event, context):
                 # Keep existing history if no changes
                 item["changeHistory"] = existing_item.get("changeHistory", [])
 
+            item = prepare_item_for_storage(item, "SIM")
             table.put_item(Item=item)
+            item = prepare_item_for_response(item, "SIM", decrypt=True)
             return build_response(simplify(item))
 
         # ----------------------------

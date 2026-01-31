@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 from shared.response_utils import SuccessResponse, ErrorResponse
+from shared.encryption_utils import prepare_item_for_storage, prepare_item_for_response
 from pydantic import BaseModel, ValidationError
 
 # DynamoDB setup
@@ -101,6 +102,7 @@ def lambda_handler(event, context):
     # Extract path (HTTP API 2.0 uses rawPath, REST API uses path)
     path = event.get("path") or event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or ""
     path_parameters = event.get("pathParameters") or {}
+    query_parameters = event.get("queryStringParameters") or {}
 
     # Log for debugging
     logger.info(f"Extracted method: {method}, path: {path}, pathParameters: {path_parameters}")
@@ -114,11 +116,17 @@ def lambda_handler(event, context):
         return SuccessResponse.build({"message": "CORS preflight successful"}, 200)
 
     try:
+        if query_parameters and "decrypt" in query_parameters:
+            should_decrypt = query_parameters.get("decrypt", "").lower() == "true"
+        else:
+            should_decrypt = True
+        
         if method == "GET" and not path_parameters:
             # GET /users
             response = table.scan()
             items = response.get("Items", [])
-            return SuccessResponse.build([simplify(item) for item in items])
+            items = [simplify(prepare_item_for_response(item, "USER", decrypt=should_decrypt)) for item in items]
+            return SuccessResponse.build(items)
 
         elif method == "GET" and "id" in path_parameters:
             # GET /users/{id}
@@ -128,6 +136,7 @@ def lambda_handler(event, context):
             item = response.get("Item")
             if not item:
                 return ErrorResponse.build("User not found", 404)
+            item = prepare_item_for_response(item, "USER", decrypt=should_decrypt)
             return SuccessResponse.build(simplify(item))
 
         elif method == "POST" and "/users/sync" in path:
@@ -234,8 +243,10 @@ def lambda_handler(event, context):
             if item.get("createdBy") and not item.get("updatedBy"):
                 item["updatedBy"] = item["createdBy"]
             
+            item = prepare_item_for_storage(item, "USER")
             logger.info(f"POST user creating with id={user.id}")
             table.put_item(Item=item)
+            item = prepare_item_for_response(item, "USER", decrypt=True)
             return SuccessResponse.build(simplify(item), status_code=201)
 
         elif method == "PUT" and "id" in path_parameters:
@@ -267,7 +278,9 @@ def lambda_handler(event, context):
             if item.get("createdBy") and not item.get("updatedBy"):
                 item["updatedBy"] = item["createdBy"]
             
+            item = prepare_item_for_storage(item, "USER")
             table.put_item(Item=item)
+            item = prepare_item_for_response(item, "USER", decrypt=True)
             return SuccessResponse.build(simplify(item))
 
         elif method == "DELETE" and "id" in path_parameters:

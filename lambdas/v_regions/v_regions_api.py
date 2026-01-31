@@ -904,7 +904,7 @@ def lambda_handler(event, context):
 def handle_get_hierarchy():
     """
     Get complete hierarchical location structure for dropdowns.
-    Returns nested structure: states -> districts -> mandals -> villages
+    Returns nested structure: states -> districts -> mandals -> villages -> habitations
     """
     try:
         logger.info("Fetching complete region hierarchy")
@@ -925,6 +925,7 @@ def handle_get_hierarchy():
         districts_by_state = {}
         mandals_by_district = {}
         villages_by_mandal = {}
+        habitations_by_village = {}
         
         for item in items:
             item = simplify(item)
@@ -965,6 +966,15 @@ def handle_get_hierarchy():
                         'code': item.get('RegionCode'),
                         'name': item.get('RegionName')
                     })
+            elif region_type == 'HABITATION':
+                village_code = item.get('VillageCode')
+                if village_code:
+                    if village_code not in habitations_by_village:
+                        habitations_by_village[village_code] = []
+                    habitations_by_village[village_code].append({
+                        'code': item.get('RegionCode'),
+                        'name': item.get('RegionName')
+                    })
         
         # Sort all arrays alphabetically by name
         states.sort(key=lambda x: x['name'])
@@ -974,16 +984,20 @@ def handle_get_hierarchy():
             mandals_by_district[district_code].sort(key=lambda x: x['name'])
         for mandal_code in villages_by_mandal:
             villages_by_mandal[mandal_code].sort(key=lambda x: x['name'])
+        for village_code in habitations_by_village:
+            habitations_by_village[village_code].sort(key=lambda x: x['name'])
         
         hierarchy = {
             'states': states,
             'districts': districts_by_state,
             'mandals': mandals_by_district,
-            'villages': villages_by_mandal
+            'villages': villages_by_mandal,
+            'habitations': habitations_by_village
         }
         
         logger.info(f"Hierarchy built: {len(states)} states, {len(districts_by_state)} district groups, "
-                   f"{len(mandals_by_district)} mandal groups, {len(villages_by_mandal)} village groups")
+               f"{len(mandals_by_district)} mandal groups, {len(villages_by_mandal)} village groups, "
+               f"{len(habitations_by_village)} habitation groups")
         
         return SuccessResponse.build(hierarchy)
         

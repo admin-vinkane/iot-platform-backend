@@ -4,6 +4,43 @@ Base URL: `https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev`
 
 ---
 
+## 🔐 Encryption & Decryption
+
+**All sensitive data is decrypted by default.** Use the `?decrypt=false` query parameter to get encrypted data.
+
+### Sensitive Fields (Encrypted)
+- **DEVICE**: `SerialNumber`
+- **SIM**: `MobileNumber`, `Provider`
+- **CUSTOMER**: `CustomerName`, `EmailAddress`, `PhoneNumber`, `Address`
+
+### Query Parameters
+- `decrypt=true` - Returns plaintext data (default)
+- `decrypt=false` - Returns encrypted data (for inter-service communication)
+
+### Example: Default (Decrypted)
+```bash
+GET /devices/DEV003
+# SerialNumber returns as plaintext
+{
+  "SerialNumber": "SN_FRESH_ENCRYPTED_999"
+}
+```
+
+### Example: Encrypted
+```bash
+GET /devices/DEV003?decrypt=false
+# SerialNumber returns as encrypted dict
+{
+  "SerialNumber": {
+    "encrypted_value": "U05fRlJFU0hfRU5DUllQVEVEXzk5OQ==",
+    "key_version": "1",
+    "encrypted_at": "2026-01-29T10:02:16.700045Z"
+  }
+}
+```
+
+---
+
 ## 1. DEVICES API
 
 **Important:** All device operations require `EntityType` and `DeviceId` as mandatory parameters.
@@ -19,17 +56,47 @@ Base URL: `https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev`
 - `EntityType` - Defaults to "DEVICE" for backward compatibility
 - `DeviceType` - Filter by device type
 - `Status` - Filter by status
+- `decrypt` - Set to `false` to get encrypted data (default: decrypted)
 
 **Request:**
 ```bash
-# Without EntityType (defaults to DEVICE)
+# Default - returns plaintext data
 curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices"
 
-# With EntityType explicitly
-curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices?EntityType=DEVICE"
+# Encrypted - returns encrypted data
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices?decrypt=false"
+
+# With filters and encrypted response
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices?Status=Active&decrypt=false"
 ```
 
-**Response (200):**
+**Response (200) - Default (Decrypted):**
+```json
+[
+  {
+    "id": "DEV001",
+    "deviceId": "DEV001",
+    "deviceName": "Water Motor Unit",
+    "deviceType": "IoT Sensor",
+    "serialNumber": {
+      "encrypted_value": "U04xMjM0NTY3ODk=",
+      "key_version": "1",
+      "encrypted_at": "2026-01-29T10:02:16.700045Z"
+    },
+    "status": "Active",
+    "currentLocation": "Site A, Building 1",
+    "createdAt": "2025-09-15T10:00:00Z",
+    "updatedAt": "2025-12-11T06:39:42.685696Z",
+    "RepairHistory": [],
+    "InstallId": null,
+    "LinkedSIM": null,
+    "PK": "DEVICE#DEV001",
+    "SK": "META"
+  }
+]
+```
+
+**Response (200) - With ?decrypt=true (Plaintext):**
 ```json
 [
   {
@@ -52,6 +119,30 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices
 ```
 
 **Note:** `LinkedSIM` will contain SIM details when a SIM card is linked to the device:
+
+**Encrypted (Default):**
+```json
+"LinkedSIM": {
+  "simId": "SIM001",
+  "linkedDate": "2025-12-15T10:30:00Z",
+  "linkStatus": "active",
+  "simDetails": {
+    "mobileNumber": {
+      "encrypted_value": "QzE0NjA5Njk0MzYxOQ==",
+      "key_version": "1",
+      "encrypted_at": "2026-01-29T10:02:16.700045Z"
+    },
+    "provider": {
+      "encrypted_value": "QWlyZGVs",
+      "key_version": "1",
+      "encrypted_at": "2026-01-29T10:02:16.700045Z"
+    },
+    "plan": "IoT Data 10GB"
+  }
+}
+```
+
+**Decrypted (?decrypt=true):**
 ```json
 "LinkedSIM": {
   "simId": "SIM001",
@@ -65,26 +156,114 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices
 }
 ```
 
-### GET /devices with filters
-**Description:** Get filtered devices by status or type  
+### GET /devices with filters & decryption
+**Description:** Get filtered devices with optional decryption  
 **Request:**
 ```bash
-curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices?EntityType=DEVICE&Status=Active"
+# Default - encrypted
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices?Status=Active"
+
+# Decrypted - for UI/apps
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices?Status=Active&decrypt=true"
 ```
 
-**Response (200):**
+**Response (200) - Encrypted:**
 ```json
 [
   {
     "id": "DEV001",
     "deviceId": "DEV001",
     "deviceName": "Water Motor Unit",
+    "serialNumber": {
+      "encrypted_value": "U04xMjM0NTY3ODk=",
+      "key_version": "1",
+      "encrypted_at": "2026-01-29T10:02:16.700045Z"
+    },
     "status": "Active"
   }
 ]
 ```
 
-### GET /devices/{deviceId}/configs
+**Response (200) - Decrypted (?decrypt=true):**
+```json
+[
+  {
+    "id": "DEV001",
+    "deviceId": "DEV001",
+    "deviceName": "Water Motor Unit",
+    "serialNumber": "SN123456789",
+    "status": "Active"
+  }
+]
+```
+
+### GET /devices/{deviceId}
+**Description:** Get single device with optional decryption  
+**Query Parameters:**
+- `decrypt=true` - Returns plaintext data
+
+**Request:**
+```bash
+# Default - encrypted
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/DEV003"
+
+# Decrypted - for UI/apps
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/DEV003?decrypt=true"
+```
+
+**Response (200) - Encrypted (Default):**
+```json
+{
+  "DeviceId": "DEV003",
+  "DeviceName": "Water Motor Unit Updated",
+  "DeviceType": "WaterMotor",
+  "SerialNumber": {
+    "encrypted_value": "U05fRlJFU0hfRU5DUllQVEVEXzk5OQ==",
+    "key_version": "1",
+    "encrypted_at": "2026-01-29T10:02:16.700045Z"
+  },
+  "Status": "Active",
+  "Location": "Test Lab",
+  "LinkedSIM": {
+    "simId": "SIM001",
+    "linkedDate": "2026-01-29T10:00:00Z",
+    "linkStatus": "active",
+    "simDetails": {
+      "MobileNumber": {
+        "encrypted_value": "QzE0NjA5Njk0MzYxOQ==",
+        "key_version": "1",
+        "encrypted_at": "2026-01-29T10:02:16.700045Z"
+      },
+      "Provider": {
+        "encrypted_value": "QWlyZGVs",
+        "key_version": "1",
+        "encrypted_at": "2026-01-29T10:02:16.700045Z"
+      }
+    }
+  }
+}
+```
+
+**Response (200) - Decrypted (?decrypt=true):**
+```json
+{
+  "DeviceId": "DEV003",
+  "DeviceName": "Water Motor Unit Updated",
+  "DeviceType": "WaterMotor",
+  "SerialNumber": "SN_FRESH_ENCRYPTED_999",
+  "Status": "Active",
+  "Location": "Test Lab",
+  "LinkedSIM": {
+    "simId": "SIM001",
+    "linkedDate": "2026-01-29T10:00:00Z",
+    "linkStatus": "active",
+    "simDetails": {
+      "MobileNumber": "+919876543210",
+      "Provider": "Airtel"
+    }
+  }
+}
+```
 **Description:** Get device configurations  
 **Request:**
 ```bash
@@ -132,7 +311,7 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices
   }'
 ```
 
-**Response (201):**
+**Response (201) - Encrypted:**
 ```json
 {
   "created": {
@@ -141,6 +320,11 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices
     "EntityType": "DEVICE",
     "DeviceId": "DEV099",
     "DeviceName": "New Water Sensor",
+    "SerialNumber": {
+      "encrypted_value": "U05fOTk5ODg4Nzc3",
+      "key_version": "1",
+      "encrypted_at": "2026-01-16T11:30:00Z"
+    },
     "Status": "available",
     "Location": "Warehouse A",
     "CreatedDate": "2026-01-16T11:30:00Z",
@@ -151,6 +335,8 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices
 }
 ```
 
+**Note:** To get plaintext SerialNumber in response, retrieve with: `GET /devices/DEV099?decrypt=true`
+
 **Response (409 - Duplicate):**
 ```json
 {
@@ -160,39 +346,71 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices
 
 ### PUT /devices
 **Description:** Update existing device (EntityType and DeviceId required)  
-**⚠️ Note:** Requires Terraform route `PUT /devices` to be configured  
+**✅ Automatically tracks changes in `changeHistory` array**  
+**✅ Sensitive fields (SerialNumber) are encrypted automatically**  
+**Tracked Fields:** DeviceName, DeviceType, SerialNumber, Status, Location  
+**Query Parameters:**
+- `decrypt=true` - Returns plaintext in response (optional)
+
 **Request:**
 ```bash
+# Update device
 curl -X PUT https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices \
   -H "Content-Type: application/json" \
   -d '{
     "EntityType": "DEVICE",
-    "DeviceId": "DEV099",
+    "DeviceId": "DEV009",
     "DeviceName": "Updated Water Sensor",
-    "Status": "Active",
-    "Location": "Site B"
+    "DeviceType": "MOTOR",
+    "SerialNumber": "SN_UPDATED_009",
+    "Status": "active",
+    "Location": "Delhi",
+    "UpdatedBy": "admin"
   }'
+
+# Get updated device decrypted
+curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/DEV009?decrypt=true
 ```
 
-**Response (200):**
+**Response (200) - Encrypted (Default):**
 ```json
 {
   "updated": {
     "EntityType": "DEVICE",
-    "DeviceId": "DEV099",
+    "DeviceId": "DEV009",
     "DeviceName": "Updated Water Sensor",
-    "Status": "Active",
-    "Location": "Site B",
-    "UpdatedDate": "2026-01-21T10:50:00Z",
-    "UpdatedBy": "admin@example.com"
+    "DeviceType": "MOTOR",
+    "SerialNumber": {
+      "encrypted_value": "U05fVVBEQVRFRF8wMDk=",
+      "key_version": "1",
+      "encrypted_at": "2026-01-28T10:44:38.605124Z"
+    },
+    "Status": "active",
+    "Location": "Delhi",
+    "UpdatedDate": "2026-01-28T10:44:38.605124Z",
+    "UpdatedBy": "admin",
+    "changeHistory": [
+      {
+        "timestamp": "2026-01-28T10:44:38.605124Z",
+        "action": "UPDATE",
+        "changes": {
+          "DeviceName": {
+            "from": "Water Sensor",
+            "to": "Updated Water Sensor"
+          },
+          "Status": {
+            "from": "inactive",
+            "to": "active"
+          },
+          "Location": {
+            "from": "Mumbai",
+            "to": "Delhi"
+          }
+        },
+        "updatedBy": "admin"
+      }
+    ]
   }
-}
-```
-
-**Response (404) - If Terraform route not configured:**
-```json
-{
-  "message": "Not Found"
 }
 ```
 
@@ -320,6 +538,54 @@ curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices
     "UpdatedDate": "2026-01-28T05:45:30.654321Z",
     "CreatedBy": "system",
     "UpdatedBy": "admin"
+  }
+}
+```
+
+### GET /devices/{deviceId}/sim
+**Description:** Get linked SIM details for a device with optional decryption  
+**Query Parameters:**
+- `decrypt=true` - Returns plaintext SIM data
+
+**Request:**
+```bash
+# Default - encrypted
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/DEV003/sim"
+
+# Decrypted - for UI
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/DEV003/sim?decrypt=true"
+```
+
+**Response (200) - Encrypted (Default):**
+```json
+{
+  "simId": "SIM001",
+  "linkedDate": "2026-01-29T10:00:00Z",
+  "linkStatus": "active",
+  "simDetails": {
+    "MobileNumber": {
+      "encrypted_value": "QzE0NjA5Njk0MzYxOQ==",
+      "key_version": "1",
+      "encrypted_at": "2026-01-29T10:02:16.700045Z"
+    },
+    "Provider": {
+      "encrypted_value": "QWlyZGVs",
+      "key_version": "1",
+      "encrypted_at": "2026-01-29T10:02:16.700045Z"
+    }
+  }
+}
+```
+
+**Response (200) - Decrypted (?decrypt=true):**
+```json
+{
+  "simId": "SIM001",
+  "linkedDate": "2026-01-29T10:00:00Z",
+  "linkStatus": "active",
+  "simDetails": {
+    "MobileNumber": "+919876543210",
+    "Provider": "Airtel"
   }
 }
 ```
@@ -2552,6 +2818,688 @@ curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/surve
   "error": "Cannot delete submitted survey"
 }
 ```
+
+---
+
+## 3. INSTALLS API
+
+### GET /installs
+**Description:** Fetch all device installations  
+**Query Parameters (Optional):**
+- `includeDevices` - Set to `true` to include linked devices in response (default: `false`)
+
+**Request (without devices):**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs"
+```
+
+**Response (200):**
+```json
+{
+  "installCount": 2,
+  "includeDevices": false,
+  "installs": [
+    {
+      "PK": "INSTALL#INST-HAB-001",
+      "SK": "META",
+      "InstallationId": "INST-HAB-001",
+      "Status": "inactive",
+      "PrimaryDevice": "chlorine",
+      "LocationHierarchy": {
+        "StateId": "TS",
+        "DistrictId": "RR",
+        "MandalId": "RR01",
+        "VillageId": "RR01001",
+        "HabitationId": "HAB-001"
+      },
+      "InstallationDate": "2026-01-20T10:00:00Z",
+      "CreatedDate": "2026-01-20T10:00:00Z",
+      "UpdatedDate": "2026-01-29T08:07:51.136123Z",
+      "CreatedBy": "admin",
+      "UpdatedBy": "admin",
+      "changeHistory": [
+        {
+          "timestamp": "2026-01-29T08:07:51.136123Z",
+          "updatedBy": "admin",
+          "ipAddress": "49.205.252.50",
+          "changes": {
+            "Status": {
+              "oldValue": "active",
+              "newValue": "inactive"
+            },
+            "PrimaryDevice": {
+              "oldValue": "water",
+              "newValue": "chlorine"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "PK": "INSTALL#INST-HAB-003",
+      "SK": "META",
+      "InstallationId": "INST-HAB-003",
+      "Status": "active",
+      "PrimaryDevice": "chlorine",
+      "LocationHierarchy": {
+        "StateId": "TS",
+        "DistrictId": "RR",
+        "MandalId": "RR01",
+        "VillageId": "RR01002",
+        "HabitationId": "HAB-003"
+      },
+      "InstallationDate": "2026-01-25T09:00:00Z",
+      "CreatedDate": "2026-01-25T09:00:00Z",
+      "UpdatedDate": "2026-01-25T09:00:00Z",
+      "CreatedBy": "technician",
+      "UpdatedBy": "technician",
+      "changeHistory": null
+    }
+  ]
+}
+```
+
+**Request (with devices - comprehensive view):**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs?includeDevices=true"
+```
+
+**Response (200):**
+```json
+{
+  "installCount": 2,
+  "includeDevices": true,
+  "installs": [
+    {
+      "PK": "INSTALL#INST-HAB-001",
+      "SK": "META",
+      "InstallationId": "INST-HAB-001",
+      "Status": "inactive",
+      "PrimaryDevice": "chlorine",
+      "LocationHierarchy": {
+        "StateId": "TS",
+        "DistrictId": "RR",
+        "MandalId": "RR01",
+        "VillageId": "RR01001",
+        "HabitationId": "HAB-001"
+      },
+      "InstallationDate": "2026-01-20T10:00:00Z",
+      "CreatedDate": "2026-01-20T10:00:00Z",
+      "UpdatedDate": "2026-01-29T08:07:51.136123Z",
+      "CreatedBy": "admin",
+      "UpdatedBy": "admin",
+      "linkedDeviceCount": 1,
+      "linkedDevices": [
+        {
+          "DeviceId": "DEV009",
+          "linkedDate": "2026-01-29T07:57:28.910107Z",
+          "linkedBy": "admin"
+        }
+      ],
+      "changeHistory": [
+        {
+          "timestamp": "2026-01-29T08:07:51.136123Z",
+          "updatedBy": "admin",
+          "ipAddress": "49.205.252.50",
+          "changes": {
+            "Status": {
+              "oldValue": "active",
+              "newValue": "inactive"
+            },
+            "PrimaryDevice": {
+              "oldValue": "water",
+              "newValue": "chlorine"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "PK": "INSTALL#INST-HAB-003",
+      "SK": "META",
+      "InstallationId": "INST-HAB-003",
+      "Status": "active",
+      "PrimaryDevice": "chlorine",
+      "LocationHierarchy": {
+        "StateId": "TS",
+        "DistrictId": "RR",
+        "MandalId": "RR01",
+        "VillageId": "RR01002",
+        "HabitationId": "HAB-003"
+      },
+      "InstallationDate": "2026-01-25T09:00:00Z",
+      "CreatedDate": "2026-01-25T09:00:00Z",
+      "UpdatedDate": "2026-01-25T09:00:00Z",
+      "CreatedBy": "technician",
+      "UpdatedBy": "technician",
+      "linkedDeviceCount": 2,
+      "linkedDevices": [
+        {
+          "DeviceId": "DEV008",
+          "linkedDate": "2026-01-29T08:19:41.349143Z",
+          "linkedBy": "admin"
+        },
+        {
+          "DeviceId": "DEV009",
+          "linkedDate": "2026-01-29T08:25:22.557145Z",
+          "linkedBy": "technician"
+        }
+      ],
+      "changeHistory": null
+    }
+  ]
+}
+```
+
+### GET /installs/{installId}/devices
+**Description:** Get all devices linked to an installation  
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INST001/devices"
+```
+
+**Response (200):**
+```json
+{
+  "installId": "INST001",
+  "deviceCount": 2,
+  "devices": [
+    {
+      "DeviceId": "DEV001",
+      "DeviceName": "Water Motor Unit",
+      "Status": "active",
+      "linkedDate": "2026-01-20T10:15:00Z",
+      "linkedBy": "admin",
+      "linkStatus": "active"
+    },
+    {
+      "DeviceId": "DEV009",
+      "DeviceName": "Pump Controller",
+      "Status": "active",
+      "linkedDate": "2026-01-20T10:20:00Z",
+      "linkedBy": "admin",
+      "linkStatus": "active"
+    }
+  ]
+}
+```
+
+### GET /installs/{installId}/history
+**Description:** Get device link/unlink history for an installation  
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INST001/history"
+```
+
+**Response (200):**
+```json
+{
+  "installId": "INST001",
+  "historyCount": 2,
+  "history": [
+    {
+      "Action": "linked",
+      "DeviceId": "DEV009",
+      "PerformedAt": "2026-01-20T10:20:00Z",
+      "PerformedBy": "admin",
+      "Reason": "Initial installation"
+    },
+    {
+      "Action": "linked",
+      "DeviceId": "DEV001",
+      "PerformedAt": "2026-01-20T10:15:00Z",
+      "PerformedBy": "admin",
+      "Reason": "Initial installation"
+    }
+  ]
+}
+```
+
+### POST /installs/{installId}/devices/link
+**Description:** Link one or more devices to an installation  
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INST001/devices/link" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "deviceIds": ["DEV010", "DEV011"],
+    "performedBy": "admin",
+    "reason": "Added as part of expansion"
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "installId": "INST001",
+  "linked": [
+    {"deviceId": "DEV010", "status": "linked"},
+    {"deviceId": "DEV011", "status": "linked"}
+  ],
+  "performedBy": "admin",
+  "timestamp": "2026-01-28T11:05:00Z"
+}
+```
+
+### POST /installs/{installId}/devices/unlink
+**Description:** Unlink one or more devices from an installation  
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INST001/devices/unlink" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "deviceIds": ["DEV010"],
+    "performedBy": "admin",
+    "reason": "Device removed from site"
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "installId": "INST001",
+  "unlinked": [
+    {"deviceId": "DEV010", "status": "unlinked"}
+  ],
+  "performedBy": "admin",
+  "timestamp": "2026-01-28T11:10:00Z"
+}
+```
+
+### POST /installs
+**Description:** Create a new installation with location hierarchy  
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "installationId": "INST-HAB-001",
+    "stateId": "STATE-001",
+    "districtId": "DIST-001",
+    "mandalId": "MANDAL-001",
+    "villageId": "VILLAGE-001",
+    "habitationId": "HAB-001",
+    "primaryDevice": "water",
+    "status": "active",
+    "installationDate": "2026-01-29T00:00:00.000Z",
+    "customerId": "CUST-001",
+    "templateId": "TMPL-001",
+    "warrantyDate": "2027-01-29T00:00:00.000Z"
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "created": {
+    "PK": "INSTALL#INST-HAB-001",
+    "SK": "META",
+    "EntityType": "INSTALL",
+    "InstallationId": "INST-HAB-001",
+    "StateId": "STATE-001",
+    "DistrictId": "DIST-001",
+    "MandalId": "MANDAL-001",
+    "VillageId": "VILLAGE-001",
+    "HabitationId": "HAB-001",
+    "PrimaryDevice": "water",
+    "Status": "active",
+    "InstallationDate": "2026-01-29T00:00:00.000Z",
+    "CustomerId": "CUST-001",
+    "TemplateId": "TMPL-001",
+    "WarrantyDate": "2027-01-29T00:00:00.000Z",
+    "CreatedDate": "2026-01-29T07:21:27.552251Z",
+    "UpdatedDate": "2026-01-29T07:21:27.552251Z",
+    "CreatedBy": "system",
+    "UpdatedBy": "system"
+  }
+}
+```
+
+**Required Fields:**
+- `installationId` - Unique identifier for the installation
+- `stateId` - State identifier
+- `districtId` - District identifier
+- `mandalId` - Mandal identifier
+- `villageId` - Village identifier
+- `habitationId` - Habitation identifier
+- `primaryDevice` - Must be "water", "chlorine", or "none"
+- `status` - Must be "active" or "inactive"
+- `installationDate` - ISO 8601 date string
+
+**Optional Fields:**
+- `customerId` - Customer reference
+- `templateId` - Template reference
+- `warrantyDate` - ISO 8601 date string
+
+### PUT /installs/{installId}
+**Description:** Update installation details  
+**Request:**
+```bash
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INST-HAB-001" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "status": "inactive",
+    "primaryDevice": "chlorine",
+    "warrantyDate": "2028-01-29T00:00:00.000Z",
+    "updatedBy": "admin"
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "message": "Installation updated successfully",
+  "installation": {
+    "PK": "INSTALL#INST-HAB-001",
+    "SK": "META",
+    "EntityType": "INSTALL",
+    "InstallationId": "INST-HAB-001",
+    "StateId": "STATE-001",
+    "DistrictId": "DIST-001",
+    "MandalId": "MANDAL-001",
+    "VillageId": "VILLAGE-001",
+    "HabitationId": "HAB-001",
+    "PrimaryDevice": "chlorine",
+    "Status": "inactive",
+    "InstallationDate": "2026-01-29T00:00:00.000Z",
+    "WarrantyDate": "2028-01-29T00:00:00.000Z",
+    "CreatedDate": "2026-01-29T07:21:27.552251Z",
+    "UpdatedDate": "2026-01-29T08:07:51.136123Z",
+    "CreatedBy": "system",
+    "UpdatedBy": "admin",
+    "changeHistory": [
+      {
+        "timestamp": "2026-01-29T08:07:51.136123Z",
+        "updatedBy": "admin",
+        "ipAddress": "49.205.252.50",
+        "changes": {
+          "Status": {
+            "oldValue": "active",
+            "newValue": "inactive"
+          },
+          "PrimaryDevice": {
+            "oldValue": "water",
+            "newValue": "chlorine"
+          }
+        }
+      }
+    ]
+  },
+  "changes": {
+    "Status": {
+      "oldValue": "active",
+      "newValue": "inactive"
+    },
+    "PrimaryDevice": {
+      "oldValue": "water",
+      "newValue": "chlorine"
+    }
+  }
+}
+```
+
+**Updatable Fields:**
+- `status` - "active" or "inactive"
+- `primaryDevice` - "water", "chlorine", or "none"
+- `warrantyDate` - ISO 8601 date string
+- `installationDate` - ISO 8601 date string
+- `customerId` - Customer reference
+- `templateId` - Template reference
+- `updatedBy` - User making the update (recommended)
+
+**Features:**
+- Only updates fields that have changed
+- Automatically tracks change history with old/new values
+- Records IP address, timestamp, and user for each change
+- Returns both the updated installation and a summary of changes
+
+---
+
+## 4. AUDIT TRAIL & CHANGE TRACKING
+
+### Overview
+The API automatically tracks all changes to devices and SIM cards through the `changeHistory` array. This feature provides complete audit trails for compliance, troubleshooting, and understanding the evolution of entity state over time.
+
+### Change Tracking Behavior
+
+#### For Devices (PUT /devices)
+**Tracked Fields:**
+- `DeviceName` - Device display name
+- `DeviceType` - Category of device (Motor, Pump, Sensor, etc.)
+- `SerialNumber` - Hardware serial number
+- `Status` - Device operational status (active, inactive, maintenance, etc.)
+- `Location` - Device physical location
+
+**Change History Structure:**
+```json
+{
+  "changeHistory": [
+    {
+      "timestamp": "2026-01-28T14:30:00Z",
+      "action": "updated",
+      "changes": {
+        "Status": { "from": "active", "to": "maintenance" },
+        "DeviceName": { "from": "Pump Unit A", "to": "Pump Unit A (Maintenance)" },
+        "Location": { "from": "Building 1", "to": "Building 1 - Service Area" }
+      },
+      "updatedBy": "technician@example.com",
+      "ipAddress": "192.168.1.100"
+    },
+    {
+      "timestamp": "2026-01-20T10:00:00Z",
+      "action": "created",
+      "changes": {
+        "Status": { "from": null, "to": "active" },
+        "DeviceName": { "from": null, "to": "Pump Unit A" }
+      },
+      "updatedBy": "admin@example.com",
+      "ipAddress": "192.168.1.50"
+    }
+  ]
+}
+```
+
+**Key Features:**
+- **Selective Recording**: Only changed fields are recorded in each history entry
+- **Before/After Values**: Each change includes both "from" and "to" values for comparison
+- **Full History**: All updates accumulate, with most recent first in the array
+- **Timestamps**: ISO 8601 format with UTC timezone
+- **User Attribution**: Tracks who made the change and their IP address
+- **Immutable**: History entries cannot be modified or deleted
+
+#### Example: Device Update with Change Tracking
+**Request:**
+```bash
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices" \
+  -H "Content-Type: application/json" \
+  -H "X-User-Email: technician@example.com" \
+  -d '{
+    "EntityType": "DEVICE",
+    "DeviceId": "DEV009",
+    "DeviceName": "Pump Unit A (Under Maintenance)",
+    "Status": "maintenance",
+    "Location": "Building 1 - Service Area"
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "PK": "DEVICE#DEV009",
+  "SK": "META",
+  "DeviceId": "DEV009",
+  "DeviceName": "Pump Unit A (Under Maintenance)",
+  "Status": "maintenance",
+  "Location": "Building 1 - Service Area",
+  "changeHistory": [
+    {
+      "timestamp": "2026-01-28T14:30:00Z",
+      "action": "updated",
+      "changes": {
+        "DeviceName": {
+          "from": "Pump Unit A",
+          "to": "Pump Unit A (Under Maintenance)"
+        },
+        "Status": {
+          "from": "active",
+          "to": "maintenance"
+        },
+        "Location": {
+          "from": "Building 1",
+          "to": "Building 1 - Service Area"
+        }
+      },
+      "updatedBy": "technician@example.com",
+      "ipAddress": "192.168.1.100"
+    },
+    {
+      "timestamp": "2026-01-20T10:00:00Z",
+      "action": "created",
+      "changes": {
+        "DeviceName": {
+          "from": null,
+          "to": "Pump Unit A"
+        },
+        "Status": {
+          "from": null,
+          "to": "active"
+        }
+      },
+      "updatedBy": "admin@example.com",
+      "ipAddress": "192.168.1.50"
+    }
+  ]
+}
+```
+
+#### For SIM Cards (PUT /simcards)
+**Tracked Fields:**
+- `status` - SIM operational status (active, inactive, suspended, etc.)
+- `planType` - Data plan type (prepaid, postpaid)
+- `monthlyDataLimit` - Monthly data quota in MB
+- `monthlyCharges` - Cost per month
+- `isRoamingEnabled` - International roaming flag
+- `provider` - Telecom provider name
+- `mobileNumber` - Associated phone number
+- `simType` - SIM type (4G, 5G, IoT)
+
+**Example: SIM Update with Change Tracking**
+**Request:**
+```bash
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/simcards" \
+  -H "Content-Type: application/json" \
+  -H "X-User-Email: admin@example.com" \
+  -d '{
+    "simId": "SIM-4",
+    "status": "inactive",
+    "planType": "postpaid",
+    "monthlyDataLimit": 2048,
+    "monthlyCharges": 500,
+    "isRoamingEnabled": true
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "simId": "SIM-4",
+  "status": "inactive",
+  "planType": "postpaid",
+  "monthlyDataLimit": 2048,
+  "monthlyCharges": 500,
+  "isRoamingEnabled": true,
+  "provider": "Airtel",
+  "mobileNumber": "+919876543210",
+  "simType": "4G",
+  "linkedDeviceId": null,
+  "changeHistory": [
+    {
+      "timestamp": "2026-01-28T15:45:00Z",
+      "action": "updated",
+      "changes": {
+        "status": {
+          "from": "active",
+          "to": "inactive"
+        },
+        "planType": {
+          "from": "prepaid",
+          "to": "postpaid"
+        },
+        "monthlyDataLimit": {
+          "from": 1024,
+          "to": 2048
+        },
+        "monthlyCharges": {
+          "from": 250,
+          "to": 500
+        },
+        "isRoamingEnabled": {
+          "from": false,
+          "to": true
+        }
+      },
+      "updatedBy": "admin@example.com",
+      "ipAddress": "192.168.1.75"
+    }
+  ]
+}
+```
+
+### SIM Link/Unlink History
+SIM link/unlink operations also create changeHistory entries on the SIM card with enhanced details:
+
+**Link Operation History Entry:**
+```json
+{
+  "timestamp": "2026-01-28T16:00:00Z",
+  "action": "linked",
+  "changes": {
+    "deviceId": {
+      "from": null,
+      "to": "DEV009"
+    },
+    "deviceName": {
+      "from": null,
+      "to": "Pump Unit A"
+    }
+  },
+  "linkedDeviceId": "DEV009",
+  "linkedBy": "technician@example.com",
+  "ipAddress": "192.168.1.100"
+}
+```
+
+**Unlink Operation History Entry:**
+```json
+{
+  "timestamp": "2026-01-28T16:30:00Z",
+  "action": "unlinked",
+  "changes": {
+    "deviceId": {
+      "from": "DEV009",
+      "to": null
+    },
+    "deviceName": {
+      "from": "Pump Unit A",
+      "to": null
+    }
+  },
+  "unlinkedBy": "technician@example.com",
+  "ipAddress": "192.168.1.100"
+}
+```
+
+### History Data Retrieval
+
+While `changeHistory` is automatically included in single-entity GET responses, you can retrieve full history for an installation's device changes:
+
+**GET /installs/{installId}/history** - Returns all device link/unlink operations for the installation with timestamps and performer information.
+
+### Retention & Archival
+- **No Expiration**: Change history entries are retained indefinitely
+- **Immutable**: Once recorded, history entries cannot be modified or deleted
+- **Compliance**: Full audit trail enables regulatory compliance (SOX, GDPR, etc.)
+- **Unbounded Growth**: For high-frequency updates, changeHistory arrays may grow large; consider archival strategies for long-lived devices
 
 ---
 

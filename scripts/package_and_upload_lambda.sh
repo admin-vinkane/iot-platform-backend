@@ -110,6 +110,19 @@ cd "$OLDPWD"
 if [ "$UPLOAD" = true ]; then
   aws s3 cp "$OUTPUT_ZIP" "s3://$BUCKET/${LAMBDA_NAME}/$VERSION/${LAMBDA_NAME}.zip"
   echo "Packaged and uploaded $OUTPUT_ZIP to s3://$BUCKET/${LAMBDA_NAME}/$VERSION/${LAMBDA_NAME}.zip"
+  
+  # Automatically update Lambda function code
+  FUNCTION_NAME="${LAMBDA_NAME}_api"
+  REGION="ap-south-2"
+  echo "[INFO] Updating Lambda function $FUNCTION_NAME with new code..."
+  aws lambda update-function-code \
+    --function-name "$FUNCTION_NAME" \
+    --s3-bucket "$BUCKET" \
+    --s3-key "${LAMBDA_NAME}/$VERSION/${LAMBDA_NAME}.zip" \
+    --region "$REGION" \
+    --query 'CodeSha256' \
+    --output text
+  echo "[SUCCESS] Lambda function $FUNCTION_NAME updated successfully"
 else
   echo "Packaged $OUTPUT_ZIP (not uploaded to S3)"
 fi

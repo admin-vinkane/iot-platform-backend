@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 from shared.response_utils import SuccessResponse, ErrorResponse
+from shared.encryption_utils import prepare_item_for_storage, prepare_item_for_response
 from pydantic import BaseModel, ValidationError
 
 # Initialize DynamoDB and logging
@@ -170,13 +171,17 @@ def lambda_handler(event, context):
     try:
         if method == "GET":
             logger.info(f"GET request - path: '{path}', params: {path_parameters}")
+            if query_parameters and "decrypt" in query_parameters:
+                should_decrypt = query_parameters.get("decrypt", "").lower() == "true"
+            else:
+                should_decrypt = True
             
             # GET /customers - List all customers
             if path in ["/customers", "/dev/customers"]:
                 response = table.scan()
                 items = response.get("Items", [])
                 # Filter only customer entities
-                customers = [simplify(item) for item in items if item.get("SK") == "ENTITY#CUSTOMER"]
+                customers = [simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=should_decrypt)) for item in items if item.get("SK") == "ENTITY#CUSTOMER"]
                 return SuccessResponse.build(customers)
             
             # GET /customers/{id}/contacts - List all contacts for a customer
@@ -191,7 +196,7 @@ def lambda_handler(event, context):
                         ":sk": "ENTITY#CONTACT#"
                     }
                 )
-                contacts = [simplify(item) for item in response.get("Items", [])]
+                contacts = [simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=should_decrypt)) for item in response.get("Items", [])]
                 return SuccessResponse.build(contacts)
             
             # GET /customers/{id}/contacts/{contactId} - Get specific contact
@@ -205,7 +210,7 @@ def lambda_handler(event, context):
                 item = response.get("Item")
                 if not item:
                     return ErrorResponse.build("Contact not found", 404)
-                return SuccessResponse.build(simplify(item))
+                return SuccessResponse.build(simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=should_decrypt)))
             
             # GET /customers/{id}/addresses - List all addresses for a customer
             elif "id" in path_parameters and "/addresses" in path and "addressId" not in path_parameters:
@@ -219,7 +224,7 @@ def lambda_handler(event, context):
                         ":sk": "ENTITY#ADDRESS#"
                     }
                 )
-                addresses = [simplify(item) for item in response.get("Items", [])]
+                addresses = [simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=should_decrypt)) for item in response.get("Items", [])]
                 return SuccessResponse.build(addresses)
             
             # GET /customers/{id}/addresses/{addressId} - Get specific address
@@ -233,7 +238,7 @@ def lambda_handler(event, context):
                 item = response.get("Item")
                 if not item:
                     return ErrorResponse.build("Address not found", 404)
-                return SuccessResponse.build(simplify(item))
+                return SuccessResponse.build(simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=should_decrypt)))
             
             # GET /customers/{id} - Get customer with nested contacts and addresses
             elif "id" in path_parameters:
@@ -258,11 +263,11 @@ def lambda_handler(event, context):
                 for item in items:
                     sk = item.get("SK", "")
                     if sk == "ENTITY#CUSTOMER":
-                        customer = simplify(item)
+                        customer = simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=should_decrypt))
                     elif sk.startswith("ENTITY#CONTACT#"):
-                        contacts.append(simplify(item))
+                        contacts.append(simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=should_decrypt)))
                     elif sk.startswith("ENTITY#ADDRESS#"):
-                        addresses.append(simplify(item))
+                        addresses.append(simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=should_decrypt)))
                 
                 if not customer:
                     return ErrorResponse.build("Customer not found", 404)
@@ -311,6 +316,7 @@ def lambda_handler(event, context):
                     return ErrorResponse.build(f"Validation error: {str(e)}", 400)
                 
                 item = contact.dict()
+                item = prepare_item_for_storage(item, "CUSTOMER")
                 try:
                     table.put_item(
                         Item=item,
@@ -322,7 +328,7 @@ def lambda_handler(event, context):
                         return ErrorResponse.build(f"Contact {contact_id} already exists", 409)
                     logger.error(f"DynamoDB error: {str(e)}")
                     raise
-                return SuccessResponse.build(simplify(item), status_code=201)
+                return SuccessResponse.build(simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=True)), status_code=201)
             
             # POST /customers/{id}/addresses - Create address
             elif "id" in path_parameters and "/addresses" in path:
@@ -353,6 +359,7 @@ def lambda_handler(event, context):
                     return ErrorResponse.build(f"Validation error: {str(e)}", 400)
                 
                 item = address.dict()
+                item = prepare_item_for_storage(item, "CUSTOMER")
                 try:
                     table.put_item(
                         Item=item,
@@ -364,7 +371,7 @@ def lambda_handler(event, context):
                         return ErrorResponse.build(f"Address {address_id} already exists", 409)
                     logger.error(f"DynamoDB error: {str(e)}")
                     raise
-                return SuccessResponse.build(simplify(item), status_code=201)
+                return SuccessResponse.build(simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=True)), status_code=201)
             
             # POST /customers - Create customer
             else:
@@ -376,6 +383,9 @@ def lambda_handler(event, context):
                 customer_data["PK"] = f"CUSTOMER#{customer_id}"
                 customer_data["SK"] = "ENTITY#CUSTOMER"
                 customer_data["customerId"] = customer_id
+                # Ensure customerNumber defaults to customerId if not provided
+                if not customer_data.get("customerNumber"):
+                    customer_data["customerNumber"] = customer_id
                 customer_data["entityType"] = "customer"
                 
                 # Set timestamps
@@ -392,6 +402,7 @@ def lambda_handler(event, context):
                     return ErrorResponse.build(f"Validation error: {str(e)}", 400)
                 
                 item = customer.dict()
+                item = prepare_item_for_storage(item, "CUSTOMER")
                 try:
                     table.put_item(
                         Item=item,
@@ -405,7 +416,7 @@ def lambda_handler(event, context):
                     raise
                 
                 logger.info(f"Created customer with ID: {customer_id}")
-                return SuccessResponse.build(simplify(item), status_code=201)
+                return SuccessResponse.build(simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=True)), status_code=201)
         
         elif method == "PUT":
             body = event.get("body")
@@ -440,8 +451,9 @@ def lambda_handler(event, context):
                     return ErrorResponse.build(f"Validation error: {str(e)}", 400)
                 
                 item = contact.dict()
+                item = prepare_item_for_storage(item, "CUSTOMER")
                 table.put_item(Item=item)
-                return SuccessResponse.build(simplify(item))
+                return SuccessResponse.build(simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=True)))
             
             # PUT /customers/{id}/addresses/{addressId} - Update address
             elif "id" in path_parameters and "addressId" in path_parameters:
@@ -466,8 +478,9 @@ def lambda_handler(event, context):
                     return ErrorResponse.build(f"Validation error: {str(e)}", 400)
                 
                 item = address.dict()
+                item = prepare_item_for_storage(item, "CUSTOMER")
                 table.put_item(Item=item)
-                return SuccessResponse.build(simplify(item))
+                return SuccessResponse.build(simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=True)))
             
             # PUT /customers/{id} - Update customer
             elif "id" in path_parameters:
@@ -480,6 +493,25 @@ def lambda_handler(event, context):
                 if "Item" not in check:
                     return ErrorResponse.build("Customer not found", 404)
                 
+                existing_item = check["Item"]
+                
+                # Set required fields (PK, SK, entityType)
+                data["PK"] = pk
+                data["SK"] = sk
+                data["entityType"] = "customer"
+                
+                # Preserve customerId and ensure customerNumber is set
+                data["customerId"] = customer_id
+                if not data.get("customerNumber"):
+                    # Use existing customerNumber if available, otherwise use customerId
+                    data["customerNumber"] = existing_item.get("customerNumber") or customer_id
+                
+                # Preserve createdAt and createdBy
+                if "createdAt" not in data and "createdAt" in existing_item:
+                    data["createdAt"] = existing_item["createdAt"]
+                if "createdBy" not in data and "createdBy" in existing_item:
+                    data["createdBy"] = existing_item["createdBy"]
+                
                 # Set updatedAt and updatedBy
                 data["updatedAt"] = datetime.utcnow().isoformat()
                 if "createdBy" in data:
@@ -491,8 +523,9 @@ def lambda_handler(event, context):
                     return ErrorResponse.build(f"Validation error: {str(e)}", 400)
                 
                 item = customer.dict()
+                item = prepare_item_for_storage(item, "CUSTOMER")
                 table.put_item(Item=item)
-                return SuccessResponse.build(simplify(item))
+                return SuccessResponse.build(simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=True)))
         
         elif method == "DELETE":
             # Check for soft delete parameter

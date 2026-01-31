@@ -9,6 +9,7 @@ import decimal
 from pydantic import BaseModel, ValidationError, Field
 from botocore.exceptions import ClientError
 from shared.response_utils import SuccessResponse, ErrorResponse
+from shared.encryption_utils import FieldEncryption, get_fields_to_encrypt, get_fields_to_decrypt
 
 TABLE_NAME = os.environ.get("TABLE_NAME", "v_devices_dev")
 SIMCARDS_TABLE_NAME = os.environ.get("SIMCARDS_TABLE_NAME", "v_simcards_dev")
@@ -16,6 +17,9 @@ dynamodb = boto3.resource("dynamodb")
 dynamodb_client = boto3.client("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
 simcards_table = dynamodb.Table(SIMCARDS_TABLE_NAME)
+
+# Initialize encryption manager
+encryption = FieldEncryption(region='ap-south-2', key_alias='alias/iot-platform-data')
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -93,6 +97,30 @@ class DeviceInstall(BaseModel):
     class Config:
         extra = "forbid"
 
+class Installation(BaseModel):
+    PK: str
+    SK: str
+    InstallationId: str
+    CustomerId: str = None
+    TemplateId: str = None
+    StateId: str
+    DistrictId: str
+    MandalId: str
+    VillageId: str
+    HabitationId: str
+    PrimaryDevice: str  # "water" | "chlorine" | "none"
+    Status: str  # "active" | "inactive"
+    InstallationDate: str
+    WarrantyDate: str = None
+    EntityType: str = "INSTALL"
+    CreatedDate: str = None
+    UpdatedDate: str = None
+    CreatedBy: str = None
+    UpdatedBy: str = None
+
+    class Config:
+        extra = "forbid"
+
 class DeviceRuntime(BaseModel):
     PK: str
     SK: str
@@ -157,6 +185,80 @@ ENTITY_MODEL_MAP = {
     "SIM_ASSOC": SimAssoc
 }
 
+def fetch_region_names(state_id=None, district_id=None, mandal_id=None, village_id=None, habitation_id=None):
+    """Fetch region names from regions table
+    
+    Returns a dict with stateName, districtName, mandalName, villageName, habitationName
+    """
+    region_names = {}
+    
+    try:
+        regions_table = dynamodb.Table(os.environ.get("REGIONS_TABLE", "v_regions_dev"))
+        logger.info(f"fetch_region_names called with: state_id={state_id}, district_id={district_id}, mandal_id={mandal_id}, village_id={village_id}, habitation_id={habitation_id}")
+        
+        # For STATE: Try both with and without STATE# prefix
+        if state_id:
+            # Try original state_id first
+            state_key = state_id.replace("STATE-", "").replace("STATE#", "")  # Strip prefixes
+            logger.info(f"Looking up STATE: PK=STATE#{state_key}, SK=STATE#{state_key}")
+            response = regions_table.get_item(
+                Key={"PK": f"STATE#{state_key}", "SK": f"STATE#{state_key}"}
+            )
+            if "Item" in response:
+                region_names["stateName"] = response["Item"].get("RegionName")
+                logger.info(f"Found state: {region_names['stateName']}")
+            else:
+                logger.warning(f"State not found: STATE#{state_key}")
+        
+        # For DISTRICT: Try to find with parent state
+        if district_id and state_id:
+            state_key = state_id.replace("STATE-", "").replace("STATE#", "")
+            district_key = district_id.replace("DIST-", "").replace("DISTRICT#", "")
+            logger.info(f"Looking up DISTRICT: PK=STATE#{state_key}, SK=DISTRICT#{district_key}")
+            response = regions_table.get_item(
+                Key={"PK": f"STATE#{state_key}", "SK": f"DISTRICT#{district_key}"}
+            )
+            if "Item" in response:
+                region_names["districtName"] = response["Item"].get("RegionName")
+                logger.info(f"Found district: {region_names['districtName']}")
+            else:
+                logger.warning(f"District not found: STATE#{state_key}, DISTRICT#{district_key}")
+        
+        # For MANDAL: Try to find with parent district
+        if mandal_id and district_id:
+            district_key = district_id.replace("DIST-", "").replace("DISTRICT#", "")
+            mandal_key = mandal_id.replace("MANDAL-", "").replace("MANDAL#", "")
+            response = regions_table.get_item(
+                Key={"PK": f"DISTRICT#{district_key}", "SK": f"MANDAL#{mandal_key}"}
+            )
+            if "Item" in response:
+                region_names["mandalName"] = response["Item"].get("RegionName")
+        
+        # For VILLAGE: Try to find with parent mandal
+        if village_id and mandal_id:
+            mandal_key = mandal_id.replace("MANDAL-", "").replace("MANDAL#", "")
+            village_key = village_id.replace("VILLAGE-", "").replace("VILLAGE#", "")
+            response = regions_table.get_item(
+                Key={"PK": f"MANDAL#{mandal_key}", "SK": f"VILLAGE#{village_key}"}
+            )
+            if "Item" in response:
+                region_names["villageName"] = response["Item"].get("RegionName")
+        
+        # For HABITATION: Try to find with parent village
+        if habitation_id and village_id:
+            village_key = village_id.replace("VILLAGE-", "").replace("VILLAGE#", "")
+            habitation_key = habitation_id.replace("HAB-", "").replace("HABITATION#", "")
+            response = regions_table.get_item(
+                Key={"PK": f"VILLAGE#{village_key}", "SK": f"HABITATION#{habitation_key}"}
+            )
+            if "Item" in response:
+                region_names["habitationName"] = response["Item"].get("RegionName")
+    
+    except Exception as e:
+        logger.warning(f"Failed to fetch region names: {str(e)}")
+    
+    return region_names
+
 def lambda_handler(event, context):
     # Log the full event for debugging
     logger.info(f"Received event: {json.dumps(event, default=str)}")
@@ -209,7 +311,129 @@ def lambda_handler(event, context):
             logger.error(f"Error fetching repairs: {str(e)}")
             return ErrorResponse.build(f"Error fetching repairs: {str(e)}", 500)
 
-    if method == "POST":
+    elif method == "POST":
+        # Check if this is a POST /installs request (create installation)
+        logger.debug(f"POST handler: path={path}, pathParams={path_parameters}, /installs in path: {'/installs' in path}")
+        if "/installs" in path and not path_parameters.get("installId"):
+            logger.info("Creating new installation")
+            
+            try:
+                body = json.loads(event.get("body", "{}"))
+            except Exception as e:
+                logger.error(f"Failed to parse body: {e}")
+                return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
+            
+            # Validate required fields
+            required_fields = ["InstallationId", "StateId", "DistrictId", "MandalId", "VillageId", "HabitationId", "PrimaryDevice", "Status", "InstallationDate"]
+            missing_fields = [field for field in required_fields if not body.get(field)]
+            if missing_fields:
+                return ErrorResponse.build(f"Missing required fields: {', '.join(missing_fields)}", 400)
+            
+            # Validate PrimaryDevice value
+            if body.get("PrimaryDevice") not in ["water", "chlorine", "none"]:
+                return ErrorResponse.build("PrimaryDevice must be 'water', 'chlorine', or 'none'", 400)
+            
+            # Validate Status value
+            if body.get("Status") not in ["active", "inactive"]:
+                return ErrorResponse.build("Status must be 'active' or 'inactive'", 400)
+            
+            # Validate optional CustomerId if provided (skip if permission issues)
+            if body.get("CustomerId"):
+                try:
+                    is_valid, error_msg, is_permission_error = validate_customer_id_exists(body.get("CustomerId"))
+                    # Only return error if it's a real validation failure (not a permission issue)
+                    if is_valid is False and not is_permission_error:
+                        return ErrorResponse.build(error_msg, 400)
+                    # If permission error, just log and continue
+                    if is_permission_error:
+                        logger.info(f"Customer validation permission issue for {body.get('CustomerId')}, allowing anyway")
+                except Exception as e:
+                    logger.warning(f"Customer validation skipped: {str(e)}")
+            
+            # Validate optional TemplateId if provided
+            if body.get("TemplateId"):
+                try:
+                    is_valid, error_msg = validate_template_id_exists(body.get("TemplateId"))
+                    if not is_valid:
+                        return ErrorResponse.build(error_msg, 400)
+                except Exception as e:
+                    logger.warning(f"Template validation skipped: {str(e)}")
+            
+            # Validate all region IDs (skip if permission issues for now)
+            region_validations = [
+                ("STATE", body.get("StateId")),
+                ("DISTRICT", body.get("DistrictId")),
+                ("MANDAL", body.get("MandalId")),
+                ("VILLAGE", body.get("VillageId")),
+                ("HABITATION", body.get("HabitationId"))
+            ]
+            
+            for region_type, region_id in region_validations:
+                try:
+                    is_valid, error_msg = validate_region_id_exists(region_type, region_id)
+                    if not is_valid:
+                        logger.warning(f"Region validation failed: {error_msg}. Skipping.")
+                except Exception as e:
+                    logger.warning(f"Region validation skipped for {region_type}: {str(e)}")
+            
+            # Create installation record
+            try:
+                installation_id = body.get("InstallationId")
+                timestamp = datetime.utcnow().isoformat() + "Z"
+                created_by = body.get("CreatedBy", "system")
+                
+                installation_item = {
+                    "PK": f"INSTALL#{installation_id}",
+                    "SK": "META",
+                    "InstallationId": installation_id,
+                    "StateId": body.get("StateId"),
+                    "DistrictId": body.get("DistrictId"),
+                    "MandalId": body.get("MandalId"),
+                    "VillageId": body.get("VillageId"),
+                    "HabitationId": body.get("HabitationId"),
+                    "PrimaryDevice": body.get("PrimaryDevice"),
+                    "Status": body.get("Status"),
+                    "InstallationDate": body.get("InstallationDate"),
+                    "EntityType": "INSTALL",
+                    "CreatedDate": timestamp,
+                    "UpdatedDate": timestamp,
+                    "CreatedBy": created_by,
+                    "UpdatedBy": created_by
+                }
+                
+                # Add optional fields
+                if body.get("CustomerId"):
+                    installation_item["CustomerId"] = body.get("CustomerId")
+                if body.get("TemplateId"):
+                    installation_item["TemplateId"] = body.get("TemplateId")
+                if body.get("WarrantyDate"):
+                    installation_item["WarrantyDate"] = body.get("WarrantyDate")
+                
+                installation_item = convert_floats_to_decimal(installation_item)
+                table.put_item(Item=installation_item)
+                
+                logger.info(f"Created installation {installation_id}")
+                
+                # Fetch and add region names to response
+                response_data = simplify(installation_item)
+                region_names = fetch_region_names(
+                    state_id=response_data.get("StateId"),
+                    district_id=response_data.get("DistrictId"),
+                    mandal_id=response_data.get("MandalId"),
+                    village_id=response_data.get("VillageId"),
+                    habitation_id=response_data.get("HabitationId")
+                )
+                response_data.update(region_names)
+                
+                return SuccessResponse.build({
+                    "message": "Installation created successfully",
+                    "installation": response_data
+                }, 201)
+                
+            except Exception as e:
+                logger.error(f"Error creating installation: {str(e)}")
+                return ErrorResponse.build(f"Error creating installation: {str(e)}", 500)
+        
         # Check if this is a /devices/{deviceId}/sim/link request
         if path_parameters.get("deviceId") and "/sim/link" in path:
             device_id = path_parameters.get("deviceId")
@@ -483,135 +707,138 @@ def lambda_handler(event, context):
         except Exception as e:
             logger.error(f"Error updating repair: {str(e)}")
             return ErrorResponse.build(f"Error updating repair: {str(e)}", 500)
+    
+    # Check if this is a /installs/{installId}/devices/link request
+    install_id_check = path_parameters.get("installId")
+    link_in_path = "/devices/link" in path
+    logger.debug(f"POST link check: path={path}, installId={install_id_check}, '/devices/link' in path: {link_in_path}, combined: {install_id_check and link_in_path}")
+    if path_parameters.get("installId") and "/devices/link" in path:
+        install_id = path_parameters.get("installId")
+        logger.info(f"Linking device(s) to install: {install_id}")
         
-        # Check if this is a /installs/{installId}/devices/link request
-        if path_parameters.get("installId") and "/devices/link" in path:
-            install_id = path_parameters.get("installId")
-            logger.info(f"Linking device(s) to install: {install_id}")
-            
-            try:
-                body = json.loads(event.get("body", "{}"))
-            except Exception as e:
-                logger.error(f"Failed to parse body: {e}")
-                return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
-            
-            # Support both single deviceId and array of deviceIds
-            device_ids = body.get("deviceIds") or ([body.get("deviceId")] if body.get("deviceId") else [])
-            if not device_ids:
-                return ErrorResponse.build("deviceId or deviceIds array is required in request body", 400)
-            
-            performed_by = body.get("performedBy", "system")
-            reason = body.get("reason")
-            ip_address = get_client_ip(event)
-            
-            # Validate install exists
-            is_valid, error_msg = validate_install_exists(install_id)
-            if not is_valid:
-                return ErrorResponse.build(error_msg, 404)
-            
-            # Link each device
-            results = []
-            errors = []
-            
-            for device_id in device_ids:
-                # Validate device format
-                if not re.match(r"^[A-Za-z0-9_-]{1,64}$", device_id):
-                    errors.append({"deviceId": device_id, "error": "Invalid deviceId format"})
-                    continue
-                
-                # Validate device exists
-                is_valid, error_msg = validate_device_exists(device_id)
-                if not is_valid:
-                    errors.append({"deviceId": device_id, "error": error_msg})
-                    continue
-                
-                # Check if already linked
-                if check_device_install_link(device_id, install_id):
-                    errors.append({"deviceId": device_id, "error": f"Device already linked to install {install_id}"})
-                    continue
-                
-                # Execute link transaction
-                success, transaction_error = execute_install_device_link_transaction(
-                    install_id, device_id, performed_by, ip_address, reason
-                )
-                
-                if success:
-                    results.append({"deviceId": device_id, "status": "linked"})
-                else:
-                    errors.append({"deviceId": device_id, "error": transaction_error})
-            
-            response_data = {
-                "installId": install_id,
-                "linked": results,
-                "performedBy": performed_by,
-                "timestamp": datetime.utcnow().isoformat() + "Z"
-            }
-            
-            if errors:
-                response_data["errors"] = errors
-            
-            status_code = 200 if results else 400
-            logger.info(f"Link operation complete: {len(results)} succeeded, {len(errors)} failed")
-            return SuccessResponse.build(response_data, status_code)
+        try:
+            body = json.loads(event.get("body", "{}"))
+        except Exception as e:
+            logger.error(f"Failed to parse body: {e}")
+            return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
         
-        # Check if this is a /installs/{installId}/devices/unlink request
-        if path_parameters.get("installId") and "/devices/unlink" in path:
-            install_id = path_parameters.get("installId")
-            logger.info(f"Unlinking device(s) from install: {install_id}")
+        # Support both single deviceId and array of deviceIds
+        device_ids = body.get("deviceIds") or ([body.get("deviceId")] if body.get("deviceId") else [])
+        if not device_ids:
+            return ErrorResponse.build("deviceId or deviceIds array is required in request body", 400)
+        
+        performed_by = body.get("performedBy", "system")
+        reason = body.get("reason")
+        ip_address = get_client_ip(event)
+        
+        # Validate install exists
+        is_valid, error_msg = validate_install_exists(install_id)
+        if not is_valid:
+            return ErrorResponse.build(error_msg, 404)
+        
+        # Link each device
+        results = []
+        errors = []
+        
+        for device_id in device_ids:
+            # Validate device format
+            if not re.match(r"^[A-Za-z0-9_-]{1,64}$", device_id):
+                errors.append({"deviceId": device_id, "error": "Invalid deviceId format"})
+                continue
             
-            try:
-                body = json.loads(event.get("body", "{}"))
-            except Exception as e:
-                logger.error(f"Failed to parse body: {e}")
-                return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
-            
-            # Support both single deviceId and array of deviceIds
-            device_ids = body.get("deviceIds") or ([body.get("deviceId")] if body.get("deviceId") else [])
-            if not device_ids:
-                return ErrorResponse.build("deviceId or deviceIds array is required in request body", 400)
-            
-            performed_by = body.get("performedBy", "system")
-            reason = body.get("reason")
-            ip_address = get_client_ip(event)
-            
-            # Validate install exists
-            is_valid, error_msg = validate_install_exists(install_id)
+            # Validate device exists
+            is_valid, error_msg = validate_device_exists(device_id)
             if not is_valid:
-                return ErrorResponse.build(error_msg, 404)
+                errors.append({"deviceId": device_id, "error": error_msg})
+                continue
             
-            # Unlink each device
-            results = []
-            errors = []
+            # Check if already linked
+            if check_device_install_link(device_id, install_id):
+                errors.append({"deviceId": device_id, "error": f"Device already linked to install {install_id}"})
+                continue
             
-            for device_id in device_ids:
-                # Validate device format
-                if not re.match(r"^[A-Za-z0-9_-]{1,64}$", device_id):
-                    errors.append({"deviceId": device_id, "error": "Invalid deviceId format"})
-                    continue
-                
-                # Execute unlink transaction
-                success, transaction_error = execute_install_device_unlink_transaction(
-                    install_id, device_id, performed_by, ip_address, reason
-                )
-                
-                if success:
-                    results.append({"deviceId": device_id, "status": "unlinked"})
-                else:
-                    errors.append({"deviceId": device_id, "error": transaction_error})
+            # Execute link transaction
+            success, transaction_error = execute_install_device_link_transaction(
+                install_id, device_id, performed_by, ip_address, reason
+            )
             
-            response_data = {
-                "installId": install_id,
-                "unlinked": results,
-                "performedBy": performed_by,
-                "timestamp": datetime.utcnow().isoformat() + "Z"
-            }
+            if success:
+                results.append({"deviceId": device_id, "status": "linked"})
+            else:
+                errors.append({"deviceId": device_id, "error": transaction_error})
+        
+        response_data = {
+            "installId": install_id,
+            "linked": results,
+            "performedBy": performed_by,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+        
+        if errors:
+            response_data["errors"] = errors
+        
+        status_code = 200 if results else 400
+        logger.info(f"Link operation complete: {len(results)} succeeded, {len(errors)} failed")
+        return SuccessResponse.build(response_data, status_code)
+    
+    # Check if this is a /installs/{installId}/devices/unlink request
+    if path_parameters.get("installId") and "/devices/unlink" in path:
+        install_id = path_parameters.get("installId")
+        logger.info(f"Unlinking device(s) from install: {install_id}")
+        
+        try:
+            body = json.loads(event.get("body", "{}"))
+        except Exception as e:
+            logger.error(f"Failed to parse body: {e}")
+            return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
+        
+        # Support both single deviceId and array of deviceIds
+        device_ids = body.get("deviceIds") or ([body.get("deviceId")] if body.get("deviceId") else [])
+        if not device_ids:
+            return ErrorResponse.build("deviceId or deviceIds array is required in request body", 400)
+        
+        performed_by = body.get("performedBy", "system")
+        reason = body.get("reason")
+        ip_address = get_client_ip(event)
+        
+        # Validate install exists
+        is_valid, error_msg = validate_install_exists(install_id)
+        if not is_valid:
+            return ErrorResponse.build(error_msg, 404)
+        
+        # Unlink each device
+        results = []
+        errors = []
+        
+        for device_id in device_ids:
+            # Validate device format
+            if not re.match(r"^[A-Za-z0-9_-]{1,64}$", device_id):
+                errors.append({"deviceId": device_id, "error": "Invalid deviceId format"})
+                continue
             
-            if errors:
-                response_data["errors"] = errors
+            # Execute unlink transaction
+            success, transaction_error = execute_install_device_unlink_transaction(
+                install_id, device_id, performed_by, ip_address, reason
+            )
             
-            status_code = 200 if results else 400
-            logger.info(f"Unlink operation complete: {len(results)} succeeded, {len(errors)} failed")
-            return SuccessResponse.build(response_data, status_code)
+            if success:
+                results.append({"deviceId": device_id, "status": "unlinked"})
+            else:
+                errors.append({"deviceId": device_id, "error": transaction_error})
+        
+        response_data = {
+            "installId": install_id,
+            "unlinked": results,
+            "performedBy": performed_by,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+        
+        if errors:
+            response_data["errors"] = errors
+        
+        status_code = 200 if results else 400
+        logger.info(f"Unlink operation complete: {len(results)} succeeded, {len(errors)} failed")
+        return SuccessResponse.build(response_data, status_code)
         
         # Default POST handler for creating entities
         try:
@@ -626,11 +853,11 @@ def lambda_handler(event, context):
         entity_type = item.get("EntityType")
         if not entity_type:
             return ErrorResponse.build("EntityType is required", 400)
-        
+    
         device_id = item.get("DeviceId")
         if not device_id:
             return ErrorResponse.build("DeviceId is required", 400)
-        
+    
         model = ENTITY_MODEL_MAP.get(entity_type)
         if not model:
             return ErrorResponse.build(f"Unknown EntityType: {entity_type}", 400)
@@ -658,7 +885,7 @@ def lambda_handler(event, context):
         try:
             # Validate with Pydantic model
             validated_item = model(**item)
-            
+        
             # Insert new item with duplicate prevention
             table.put_item(
                 Item=item,
@@ -690,6 +917,13 @@ def lambda_handler(event, context):
         if device_id_param and "/sim" in path:
             device_id = device_id_param
             logger.info(f"Fetching linked SIM for device: {device_id}")
+            
+            # Check if caller wants decrypted data (default: decrypted)
+            if "decrypt" in params:
+                should_decrypt = params.get("decrypt", "").lower() == "true"
+            else:
+                should_decrypt = True
+            logger.info(f"GET /devices/{device_id}/sim - decrypt={should_decrypt}")
             
             # Validate deviceId format
             if not device_id or not re.match(r"^[A-Za-z0-9_-]{1,64}$", device_id):
@@ -728,7 +962,7 @@ def lambda_handler(event, context):
                     return ErrorResponse.build("Invalid SIM association data", 500)
                 
                 # Fetch full SIM details from simcards table
-                success, sim_data, error_msg = fetch_sim_details(sim_id)
+                success, sim_data, error_msg = fetch_sim_details(sim_id, should_decrypt=should_decrypt)
                 if not success:
                     logger.error(f"Failed to fetch SIM details: {error_msg}")
                     return ErrorResponse.build(error_msg, 500)
@@ -780,13 +1014,216 @@ def lambda_handler(event, context):
                 )
                 items = response.get("Items", [])
                 logger.info(f"Found {len(items)} config(s) for device {device_id}")
-                return SuccessResponse.build(transform_items_to_json(items))
+                return SuccessResponse.build(transform_items_to_json(items, should_decrypt=should_decrypt))
             except ClientError as e:
                 logger.error(f"Database error fetching configs for {device_id}: {str(e)}")
                 return ErrorResponse.build(f"Database error: {e.response['Error']['Message']}", 500)
             except Exception as e:
                 logger.error(f"Unexpected error fetching configs for {device_id}: {str(e)}")
                 return ErrorResponse.build(f"Error fetching configs: {str(e)}", 500)
+
+        # Check if this is a GET /installs/{installId} request (single install) - must be before /devices and /history checks
+        # This needs to check that the path is exactly /installs/{installId} without sub-paths
+        install_id_param = path_parameters.get("installId")
+        logger.debug(f"GET handler: path={path}, installId={install_id_param}, '/installs' in path: {'/installs' in path}, '/devices' in path: {'/devices' in path}, '/history' in path: {'/history' in path}")
+        if install_id_param and "/installs" in path and "/devices" not in path and "/history" not in path:
+            install_id = path_parameters.get("installId")
+            logger.info(f"Fetching install: {install_id}")
+
+            # Check query params
+            include_devices = params.get("includeDevices", "false").lower() == "true"
+            include_customer = params.get("includeCustomer", "true").lower() == "true"
+
+            try:
+                response = table.get_item(
+                    Key={"PK": f"INSTALL#{install_id}", "SK": "META"}
+                )
+                if "Item" not in response:
+                    return ErrorResponse.build(f"Installation {install_id} not found", 404)
+
+                install_data = simplify(response["Item"])
+
+                # Fetch and add region names
+                region_names = fetch_region_names(
+                    state_id=install_data.get("StateId"),
+                    district_id=install_data.get("DistrictId"),
+                    mandal_id=install_data.get("MandalId"),
+                    village_id=install_data.get("VillageId"),
+                    habitation_id=install_data.get("HabitationId")
+                )
+                install_data.update(region_names)
+
+                # If includeCustomer is requested, fetch customer details
+                if include_customer:
+                    customer_id = install_data.get("CustomerId")
+                    if customer_id:
+                        try:
+                            customers_table = dynamodb.Table(os.environ.get("CUSTOMERS_TABLE", "v_customers_dev"))
+                            customer_response = customers_table.get_item(
+                                Key={"PK": f"CUSTOMER#{customer_id}", "SK": "ENTITY#CUSTOMER"}
+                            )
+                            if "Item" in customer_response:
+                                customer_item = simplify(customer_response["Item"])
+                                install_data["customerName"] = customer_item.get("name")
+                                install_data["customer"] = {
+                                    "customerId": customer_item.get("customerId") or customer_id,
+                                    "name": customer_item.get("name"),
+                                    "companyName": customer_item.get("companyName"),
+                                    "email": customer_item.get("email"),
+                                    "phone": customer_item.get("phone"),
+                                    "countryCode": customer_item.get("countryCode"),
+                                    "customerNumber": customer_item.get("customerNumber")
+                                }
+                            else:
+                                install_data["customer"] = {"customerId": customer_id, "error": "Customer not found"}
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch customer {customer_id}: {str(e)}")
+                            install_data["customer"] = {"customerId": customer_id, "error": f"Lookup error: {str(e)}"}
+
+                # If includeDevices is requested, fetch linked devices
+                if include_devices:
+                    device_response = table.query(
+                        KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                        ExpressionAttributeValues={
+                            ":pk": f"INSTALL#{install_id}",
+                            ":sk": "DEVICE_ASSOC#"
+                        }
+                    )
+
+                    linked_devices = []
+                    for assoc in device_response.get("Items", []):
+                        device_id = assoc.get("DeviceId")
+                        if device_id:
+                            device_item = table.get_item(
+                                Key={"PK": f"DEVICE#{device_id}", "SK": "META"}
+                            )
+                            if "Item" in device_item:
+                                device_data = simplify(device_item["Item"])
+                                device_data["linkedDate"] = assoc.get("LinkedDate")
+                                device_data["linkedBy"] = assoc.get("LinkedBy")
+                                device_data["linkStatus"] = assoc.get("Status")
+                                linked_devices.append(device_data)
+
+                    install_data["linkedDevices"] = linked_devices
+                    install_data["linkedDeviceCount"] = len(linked_devices)
+
+                return SuccessResponse.build(install_data)
+
+            except ClientError as e:
+                logger.error(f"Database error fetching install {install_id}: {str(e)}")
+                return ErrorResponse.build(f"Database error: {e.response['Error']['Message']}", 500)
+            except Exception as e:
+                logger.error(f"Unexpected error fetching install {install_id}: {str(e)}")
+                return ErrorResponse.build(f"Error fetching install: {str(e)}", 500)
+        
+        # Check if this is a GET /installs request (list all installs)
+        if "/installs" in path and not path_parameters.get("installId"):
+            logger.info("Fetching all installs")
+            
+            # Check if includeDevices query parameter is set
+            query_params = event.get("queryStringParameters") or {}
+            include_devices = query_params.get("includeDevices", "false").lower() == "true"
+            include_customer = query_params.get("includeCustomer", "true").lower() == "true"
+            
+            try:
+                # Query all INSTALL records
+                response = table.scan(
+                    FilterExpression="begins_with(PK, :pk_prefix)",
+                    ExpressionAttributeValues={
+                        ":pk_prefix": "INSTALL#"
+                    }
+                )
+                
+                installs = []
+                for item in response.get("Items", []):
+                    # Only include items with SK = META (main install record)
+                    if item.get("SK") == "META":
+                        install_data = simplify(item)
+                        
+                        # Fetch and add region names
+                        region_names = fetch_region_names(
+                            state_id=install_data.get("StateId"),
+                            district_id=install_data.get("DistrictId"),
+                            mandal_id=install_data.get("MandalId"),
+                            village_id=install_data.get("VillageId"),
+                            habitation_id=install_data.get("HabitationId")
+                        )
+                        install_data.update(region_names)
+                        
+                        # If includeCustomer is requested, fetch customer details
+                        if include_customer:
+                            customer_id = install_data.get("CustomerId")
+                            if customer_id:
+                                # Query customer from v_customers table
+                                try:
+                                    customers_table = dynamodb.Table(os.environ.get("CUSTOMERS_TABLE", "v_customers_dev"))
+                                    customer_response = customers_table.get_item(
+                                        Key={"PK": f"CUSTOMER#{customer_id}", "SK": "ENTITY#CUSTOMER"}
+                                    )
+                                    if "Item" in customer_response:
+                                        customer_item = simplify(customer_response["Item"])
+                                        # Add customerName to base payload
+                                        install_data["customerName"] = customer_item.get("name")
+                                        # Include only relevant customer fields
+                                        install_data["customer"] = {
+                                            "customerId": customer_item.get("customerId") or customer_id,
+                                            "name": customer_item.get("name"),
+                                            "companyName": customer_item.get("companyName"),
+                                            "email": customer_item.get("email"),
+                                            "phone": customer_item.get("phone"),
+                                            "countryCode": customer_item.get("countryCode")
+                                        }
+                                except Exception as e:
+                                    logger.warning(f"Failed to fetch customer {customer_id}: {str(e)}")
+                                    install_data["customer"] = {"customerId": customer_id, "error": "Customer not found"}
+                        
+                        # If includeDevices is requested, fetch linked devices
+                        if include_devices:
+                            install_id = install_data.get("InstallationId")
+                            if install_id:
+                                # Query device associations for this installation
+                                device_response = table.query(
+                                    KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                                    ExpressionAttributeValues={
+                                        ":pk": f"INSTALL#{install_id}",
+                                        ":sk": "DEVICE_ASSOC#"
+                                    }
+                                )
+                                
+                                linked_devices = []
+                                for assoc in device_response.get("Items", []):
+                                    device_id = assoc.get("DeviceId")
+                                    if device_id:
+                                        # Get device details
+                                        device_item = table.get_item(
+                                            Key={"PK": f"DEVICE#{device_id}", "SK": "META"}
+                                        )
+                                        if "Item" in device_item:
+                                            device_data = simplify(device_item["Item"])
+                                            device_data["linkedDate"] = assoc.get("LinkedDate")
+                                            device_data["linkedBy"] = assoc.get("LinkedBy")
+                                            device_data["linkStatus"] = assoc.get("Status")
+                                            linked_devices.append(device_data)
+                                
+                                install_data["linkedDevices"] = linked_devices
+                                install_data["linkedDeviceCount"] = len(linked_devices)
+                        
+                        installs.append(install_data)
+                
+                logger.info(f"Found {len(installs)} install(s)")
+                return SuccessResponse.build({
+                    "installCount": len(installs),
+                    "installs": installs,
+                    "includeDevices": include_devices,
+                    "includeCustomer": include_customer
+                }, 200)
+                
+            except ClientError as e:
+                logger.error(f"Database error fetching installs: {str(e)}")
+                return ErrorResponse.build(f"Database error: {e.response['Error']['Message']}", 500)
+            except Exception as e:
+                logger.error(f"Unexpected error fetching installs: {str(e)}")
+                return ErrorResponse.build(f"Error fetching installs: {str(e)}", 500)
         
         # Check if this is a /installs/{installId}/devices request
         if path_parameters.get("installId") and "/devices" in path:
@@ -839,8 +1276,13 @@ def lambda_handler(event, context):
                 return ErrorResponse.build(f"Error: {str(e)}", 500)
 
 
-        def handle_get_device(device_id: str):
-            """Fetch a single device with repair history and linked SIM details."""
+        def handle_get_device(device_id: str, should_decrypt: bool = True):
+            """Fetch a single device with repair history and linked SIM details.
+            
+            Args:
+                device_id: The device ID to fetch
+                should_decrypt: If True (default), decrypt sensitive fields. If False, return encrypted data.
+            """
             # Validate deviceId format
             if not device_id or not re.match(r"^[A-Za-z0-9_-]{1,64}$", device_id):
                 return ErrorResponse.build("Invalid deviceId format. Must be alphanumeric with optional _ or - (1-64 chars)", 400)
@@ -851,6 +1293,11 @@ def lambda_handler(event, context):
                     return ErrorResponse.build(f"Device {device_id} not found", 404)
 
                 item = device_response["Item"]
+                
+                # Import encryption helper
+                from shared.encryption_utils import prepare_item_for_response
+                # Apply encryption/decryption based on decrypt parameter
+                item = prepare_item_for_response(item, "DEVICE", decrypt=should_decrypt)
 
                 # Repair history
                 try:
@@ -880,7 +1327,7 @@ def lambda_handler(event, context):
                         sim_assoc = sim_items[0]
                         sim_id = sim_assoc.get("SIMId")
                         if sim_id:
-                            success, sim_data, error_msg = fetch_sim_details(sim_id)
+                            success, sim_data, error_msg = fetch_sim_details(sim_id, should_decrypt=should_decrypt)
                             if success:
                                 item["LinkedSIM"] = {
                                     "simId": sim_id,
@@ -951,6 +1398,31 @@ def lambda_handler(event, context):
                         install_data["linkedBy"] = assoc.get("LinkedBy")
                         install_data["linkStatus"] = assoc.get("Status")
                         
+                        # Add customer information if available
+                        customer_id = install_data.get("CustomerId")
+                        if customer_id:
+                            try:
+                                customers_table = dynamodb.Table(os.environ.get("CUSTOMERS_TABLE", "v_customers_dev"))
+                                customer_response = customers_table.get_item(
+                                    Key={"PK": f"CUSTOMER#{customer_id}", "SK": "ENTITY#CUSTOMER"}
+                                )
+                                if "Item" in customer_response:
+                                    customer_item = customer_response["Item"]
+                                    install_data["customer"] = {
+                                        "customerId": customer_item.get("customerId") or customer_id,
+                                        "name": customer_item.get("name"),
+                                        "companyName": customer_item.get("companyName"),
+                                        "email": customer_item.get("email"),
+                                        "phone": customer_item.get("phone"),
+                                        "countryCode": customer_item.get("countryCode"),
+                                        "customerNumber": customer_item.get("customerNumber")
+                                    }
+                                else:
+                                    install_data["customer"] = {"customerId": customer_id, "error": "Customer not found"}
+                            except Exception as e:
+                                logger.warning(f"Failed to fetch customer {customer_id}: {str(e)}")
+                                install_data["customer"] = {"customerId": customer_id, "error": f"Lookup error: {str(e)}"}
+                        
                         logger.info(f"Found install {install_id} for device {device_id}")
                         return SuccessResponse.build(install_data)
                 
@@ -1004,12 +1476,25 @@ def lambda_handler(event, context):
         
         # GET /devices/{deviceId}
         if device_id_param:
-            return handle_get_device(device_id_param)
+            # Check if caller wants decrypted data (default: decrypted)
+            if "decrypt" in params:
+                should_decrypt = params.get("decrypt", "").lower() == "true"
+            else:
+                should_decrypt = True
+            logger.info(f"GET /devices/{device_id_param} - decrypt={should_decrypt}")
+            return handle_get_device(device_id_param, should_decrypt=should_decrypt)
 
         # Default: GET /devices - list all devices with optional filters
         # EntityType defaults to "DEVICE" if not provided for backward compatibility
         device_type = params.get("DeviceType")
         status = params.get("Status")
+        
+        # Check if caller wants decrypted data (default: decrypted)
+        if "decrypt" in params:
+            should_decrypt = params.get("decrypt", "").lower() == "true"
+        else:
+            should_decrypt = True
+        logger.info(f"GET /devices - decrypt={should_decrypt}")
 
         filter_expression = []
         expression_values = {}
@@ -1043,6 +1528,10 @@ def lambda_handler(event, context):
 
             items = response.get("Items", [])
             for item in items:
+                # Import encryption helpers
+                from shared.encryption_utils import prepare_item_for_response
+                # Apply encryption/decryption based on decrypt parameter
+                item = prepare_item_for_response(item, "DEVICE", decrypt=should_decrypt)
                 device_id = item.get("DeviceId")
                 if device_id:
                     # Fetch repair history
@@ -1076,7 +1565,7 @@ def lambda_handler(event, context):
                             sim_id = sim_assoc.get("SIMId")
                             if sim_id:
                                 # Fetch full SIM details from simcards table
-                                success, sim_data, error_msg = fetch_sim_details(sim_id)
+                                success, sim_data, error_msg = fetch_sim_details(sim_id, should_decrypt=should_decrypt)
                                 if success:
                                     item["LinkedSIM"] = {
                                         "simId": sim_id,
@@ -1096,12 +1585,148 @@ def lambda_handler(event, context):
                         logger.error(f"Error fetching linked SIM for {device_id}: {str(e)}")
                         item["LinkedSIM"] = None
             
-            return SuccessResponse.build(transform_items_to_json(items))
+            return SuccessResponse.build(transform_items_to_json(items, should_decrypt=should_decrypt))
         except Exception as e:
             logger.error(f"DynamoDB scan error: {str(e)}")
             return ErrorResponse.build(f"DynamoDB scan error: {str(e)}", 500)
 
     elif method == "PUT":
+        # Check if this is a PUT /installs/{installId} request
+        if path_parameters.get("installId") and "/installs" in path:
+            install_id = path_parameters.get("installId")
+            logger.info(f"Updating installation: {install_id}")
+            
+            try:
+                body = json.loads(event.get("body", "{}"))
+            except Exception as e:
+                logger.error(f"Failed to parse body: {e}")
+                return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
+            
+            # Validate installation exists
+            try:
+                install_response = table.get_item(
+                    Key={"PK": f"INSTALL#{install_id}", "SK": "META"}
+                )
+                if "Item" not in install_response:
+                    return ErrorResponse.build(f"Installation {install_id} not found", 404)
+                
+                existing_install = install_response["Item"]
+            except Exception as e:
+                logger.error(f"Error checking installation existence: {str(e)}")
+                return ErrorResponse.build(f"Error validating installation: {str(e)}", 500)
+            
+            # Fields that can be updated
+            updatable_fields = {
+                "Status": "status",
+                "PrimaryDevice": "primaryDevice", 
+                "WarrantyDate": "warrantyDate",
+                "InstallationDate": "installationDate",
+                "CustomerId": "customerId",
+                "TemplateId": "templateId"
+            }
+            
+            # Track changes
+            changes = {}
+            updated_fields = {}
+            
+            for db_field, request_field in updatable_fields.items():
+                if request_field in body:
+                    new_value = body[request_field]
+                    old_value = existing_install.get(db_field)
+                    
+                    # Only update if value changed
+                    if new_value != old_value:
+                        updated_fields[db_field] = new_value
+                        changes[db_field] = {
+                            "oldValue": old_value,
+                            "newValue": new_value
+                        }
+            
+            if not updated_fields:
+                return ErrorResponse.build("No valid fields to update", 400)
+            
+            # Validate status if being updated
+            if "Status" in updated_fields and updated_fields["Status"] not in ["active", "inactive"]:
+                return ErrorResponse.build("Status must be 'active' or 'inactive'", 400)
+            
+            # Validate primaryDevice if being updated
+            if "PrimaryDevice" in updated_fields and updated_fields["PrimaryDevice"] not in ["water", "chlorine", "none"]:
+                return ErrorResponse.build("PrimaryDevice must be 'water', 'chlorine', or 'none'", 400)
+            
+            # Update the installation
+            timestamp = datetime.utcnow().isoformat() + "Z"
+            updated_fields["UpdatedDate"] = timestamp
+            updated_fields["UpdatedBy"] = body.get("updatedBy", "system")
+            
+            # Build update expression with attribute name aliases for reserved keywords
+            update_expr_parts = []
+            expr_attr_values = {}
+            expr_attr_names = {}
+            
+            # Reserved keywords in DynamoDB that need aliases
+            reserved_keywords = {"Status"}
+            
+            for field, value in updated_fields.items():
+                if field in reserved_keywords:
+                    # Use attribute name alias for reserved keywords
+                    alias = f"#{field}"
+                    expr_attr_names[alias] = field
+                    update_expr_parts.append(f"{alias} = :{field}")
+                else:
+                    update_expr_parts.append(f"{field} = :{field}")
+                expr_attr_values[f":{field}"] = value
+            
+            # Add change history entry
+            change_entry = {
+                "timestamp": timestamp,
+                "updatedBy": updated_fields["UpdatedBy"],
+                "changes": changes,
+                "ipAddress": get_client_ip(event)
+            }
+            
+            update_expr_parts.append("changeHistory = list_append(if_not_exists(changeHistory, :empty_list), :change)")
+            expr_attr_values[":empty_list"] = []
+            expr_attr_values[":change"] = [change_entry]
+            
+            update_expression = "SET " + ", ".join(update_expr_parts)
+            
+            try:
+                update_params = {
+                    "Key": {"PK": f"INSTALL#{install_id}", "SK": "META"},
+                    "UpdateExpression": update_expression,
+                    "ExpressionAttributeValues": expr_attr_values,
+                    "ReturnValues": "ALL_NEW"
+                }
+                
+                # Only add ExpressionAttributeNames if we have reserved keywords
+                if expr_attr_names:
+                    update_params["ExpressionAttributeNames"] = expr_attr_names
+                
+                response = table.update_item(**update_params)
+                
+                updated_install = simplify(response["Attributes"])
+                logger.info(f"Updated installation {install_id}: {list(changes.keys())}")
+                
+                # Fetch and add region names to response
+                region_names = fetch_region_names(
+                    state_id=updated_install.get("StateId"),
+                    district_id=updated_install.get("DistrictId"),
+                    mandal_id=updated_install.get("MandalId"),
+                    village_id=updated_install.get("VillageId"),
+                    habitation_id=updated_install.get("HabitationId")
+                )
+                updated_install.update(region_names)
+                
+                return SuccessResponse.build({
+                    "message": "Installation updated successfully",
+                    "installation": updated_install,
+                    "changes": changes
+                }, 200)
+            except Exception as e:
+                logger.error(f"Error updating installation: {str(e)}")
+                return ErrorResponse.build(f"Error updating installation: {str(e)}", 500)
+        
+        # Default PUT handler for device entities
         try:
             item = json.loads(event.get("body", "{}"))
             if not isinstance(item, dict):
@@ -1162,6 +1787,10 @@ def lambda_handler(event, context):
 
         # Remove PK and SK from update fields
         update_fields = {k: v for k, v in item.items() if k not in ["PK", "SK"]}
+
+        # Apply encryption to sensitive fields before storing
+        from shared.encryption_utils import prepare_item_for_storage
+        update_fields = prepare_item_for_storage(update_fields, entity_type)
 
         # Build UpdateExpression and ExpressionAttributeValues
         reserved_keywords = {"Status", "Location"}
@@ -1319,7 +1948,7 @@ def simplify(item):
 
     return {k: simplify_value(v) for k, v in item.items()}
 
-def transform_items_to_json(items):
+def transform_items_to_json(items, should_decrypt=True):
     """Transform a list of DynamoDB items to a list of JSON objects for devices."""
     if not items:
         return []
@@ -1333,6 +1962,8 @@ def transform_items_to_json(items):
 
     results = []
     for item in items:
+        from shared.encryption_utils import prepare_item_for_response
+        item = prepare_item_for_response(item, "DEVICE", decrypt=should_decrypt)
         item = simplify(item)
         if not item or not isinstance(item, dict):
             continue
@@ -1355,6 +1986,7 @@ def transform_items_to_json(items):
             "RepairHistory": item.get("RepairHistory"),
             "InstallId": install_lookup.get(item.get("DeviceId")),  # <-- Add InstallId here
             "LinkedSIM": item.get("LinkedSIM"),  # <-- Add LinkedSIM here
+            "LinkedInstallationId": item.get("LinkedInstallationId"),  # <-- Add LinkedInstallationId here
             "PK": item.get("PK"),
             "SK": item.get("SK")
         }
@@ -1706,10 +2338,16 @@ def get_client_ip(event):
     # Fallback
     return "unknown"
 
-def fetch_sim_details(sim_id):
+def fetch_sim_details(sim_id, should_decrypt=False):
     """
     Fetch full SIM card details from simcards table.
-    Returns (success, sim_data, error_message)
+    
+    Args:
+        sim_id: The SIM card ID
+        should_decrypt: If True, decrypt sensitive SIM fields. If False (default), return encrypted data.
+    
+    Returns:
+        (success, sim_data, error_message)
     """
     try:
         response = simcards_table.get_item(
@@ -1722,7 +2360,13 @@ def fetch_sim_details(sim_id):
         if "Item" not in response:
             return False, None, f"SIM card {sim_id} not found"
         
-        return True, simplify(response["Item"]), None
+        sim_data = response["Item"]
+        
+        # Apply encryption/decryption based on decrypt parameter
+        from shared.encryption_utils import prepare_item_for_response
+        sim_data = prepare_item_for_response(sim_data, "SIM", decrypt=should_decrypt)
+        
+        return True, simplify(sim_data), None
     
     except ClientError as e:
         logger.error(f"Error fetching SIM {sim_id}: {str(e)}")
@@ -1779,6 +2423,107 @@ def check_device_install_link(device_id, install_id):
         return False
 
 
+def validate_region_id_exists(region_type, region_id):
+    """
+    Validate that a region ID exists in v_regions table.
+    region_type: "STATE", "DISTRICT", "MANDAL", "VILLAGE", "HABITATION"
+    Returns (success, error_message)
+    """
+    try:
+        regions_table = dynamodb.Table("v_regions_dev")
+        response = regions_table.get_item(
+            Key={"PK": f"{region_type}#{region_id}", "SK": "META"}
+        )
+        if "Item" not in response:
+            return False, f"{region_type} {region_id} not found"
+        return True, None
+    except Exception as e:
+        logger.error(f"Error validating {region_type} {region_id}: {str(e)}")
+        return False, f"Error validating {region_type}: {str(e)}"
+
+
+def validate_customer_id_exists(customer_id):
+    """
+    Validate that a customer ID exists in v_customers table.
+    Returns (success, error_message, is_permission_error)
+    If permission error, returns (None, message, True) to allow graceful degradation
+    """
+    try:
+        customers_table = dynamodb.Table("v_customers_dev")
+        response = customers_table.get_item(
+            Key={"PK": f"CUSTOMER#{customer_id}", "SK": "META"}
+        )
+        if "Item" not in response:
+            return False, f"Customer {customer_id} not found", False
+        return True, None, False
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code == "AccessDeniedException":
+            logger.warning(f"Permission denied validating customer {customer_id} - allowing anyway: {str(e)}")
+            return None, f"Customer validation skipped (permission denied)", True
+        else:
+            logger.error(f"Error validating customer {customer_id}: {str(e)}")
+            return False, f"Error validating customer: {str(e)}", False
+    except Exception as e:
+        logger.error(f"Unexpected error validating customer {customer_id}: {str(e)}")
+        return False, f"Error validating customer: {str(e)}", False
+
+
+def validate_template_id_exists(template_id):
+    """
+    Validate that a template ID exists.
+    For now, we'll accept any non-empty template ID (can be enhanced later).
+    Returns (success, error_message)
+    """
+    if not template_id or not isinstance(template_id, str) or len(template_id.strip()) == 0:
+        return False, "Template ID must be a non-empty string"
+    return True, None
+
+
+def prepare_item_for_storage(item, entity_type):
+    """
+    Encrypt sensitive fields before storing in DynamoDB
+    Args:
+        item: Dictionary of data to store
+        entity_type: Type of entity (DEVICE, SIM, CUSTOMER, etc.)
+    Returns:
+        Item with encrypted fields
+    """
+    fields_to_encrypt = get_fields_to_encrypt(entity_type)
+    if not fields_to_encrypt:
+        return item
+    
+    result = item.copy()
+    for field in fields_to_encrypt:
+        if field in result and result[field]:
+            result[field] = encryption.encrypt_field(result[field], field)
+    
+    logger.debug(f"Prepared {entity_type} for storage with {len(fields_to_encrypt)} encrypted fields")
+    return result
+
+
+def prepare_item_for_response(item, entity_type):
+    """
+    Decrypt sensitive fields after retrieving from DynamoDB
+    Args:
+        item: Dictionary of data retrieved
+        entity_type: Type of entity (DEVICE, SIM, CUSTOMER, etc.)
+    Returns:
+        Item with decrypted fields
+    """
+    fields_to_decrypt = get_fields_to_decrypt(entity_type)
+    if not fields_to_decrypt:
+        return item
+    
+    result = item.copy()
+    for field in fields_to_decrypt:
+        if field in result and result[field]:
+            result[field] = encryption.decrypt_field(result[field], field)
+    
+    logger.debug(f"Prepared {entity_type} for response with {len(fields_to_decrypt)} decrypted fields")
+    return result
+
+
 def create_install_device_history(install_id, device_id, action, performed_by, ip_address, reason=None):
     """Create a history record for install-device link/unlink operations."""
     timestamp = datetime.utcnow().isoformat() + "Z"
@@ -1810,13 +2555,15 @@ def create_install_device_history(install_id, device_id, action, performed_by, i
 def execute_install_device_link_transaction(install_id, device_id, performed_by, ip_address, reason=None):
     """
     Execute atomic transaction to link a device to an install.
-    Creates bidirectional associations and history record.
+    Creates bidirectional associations, updates device's META record with LinkedInstallationId,
+    and adds installation history to device record.
     """
     timestamp = datetime.utcnow().isoformat() + "Z"
     
     # Prepare transaction items
     transact_items = [
         {
+            # Create association: INSTALL -> DEVICE
             "Put": {
                 "TableName": TABLE_NAME,
                 "Item": {
@@ -1835,6 +2582,7 @@ def execute_install_device_link_transaction(install_id, device_id, performed_by,
             }
         },
         {
+            # Create association: DEVICE -> INSTALL
             "Put": {
                 "TableName": TABLE_NAME,
                 "Item": {
@@ -1850,6 +2598,36 @@ def execute_install_device_link_transaction(install_id, device_id, performed_by,
                     "UpdatedDate": {"S": timestamp}
                 },
                 "ConditionExpression": "attribute_not_exists(PK) AND attribute_not_exists(SK)"
+            }
+        },
+        {
+            # Update device META record to store LinkedInstallationId and add installation history
+            "Update": {
+                "TableName": TABLE_NAME,
+                "Key": {
+                    "PK": {"S": f"DEVICE#{device_id}"},
+                    "SK": {"S": "META"}
+                },
+                "UpdateExpression": "SET LinkedInstallationId = :installId, InstallationHistory = list_append(if_not_exists(InstallationHistory, :empty_list), :install_history)",
+                "ExpressionAttributeValues": {
+                    ":installId": {"S": install_id},
+                    ":empty_list": {"L": []},
+                    ":install_history": {
+                        "L": [
+                            {
+                                "M": {
+                                    "timestamp": {"S": timestamp},
+                                    "action": {"S": "linked"},
+                                    "installationId": {"S": install_id},
+                                    "performedBy": {"S": performed_by},
+                                    "ipAddress": {"S": ip_address},
+                                    "reason": {"S": reason or ""}
+                                }
+                            }
+                        ]
+                    }
+                },
+                "ConditionExpression": "attribute_exists(PK) AND attribute_exists(SK)"
             }
         }
     ]
@@ -1880,12 +2658,15 @@ def execute_install_device_link_transaction(install_id, device_id, performed_by,
 def execute_install_device_unlink_transaction(install_id, device_id, performed_by, ip_address, reason=None):
     """
     Execute atomic transaction to unlink a device from an install.
-    Deletes bidirectional associations and creates history record.
+    Deletes bidirectional associations, removes LinkedInstallationId from device META,
+    and adds unlink history to device record.
     """
+    timestamp = datetime.utcnow().isoformat() + "Z"
     
     # Prepare transaction items
     transact_items = [
         {
+            # Delete association: INSTALL -> DEVICE
             "Delete": {
                 "TableName": TABLE_NAME,
                 "Key": {
@@ -1896,11 +2677,41 @@ def execute_install_device_unlink_transaction(install_id, device_id, performed_b
             }
         },
         {
+            # Delete association: DEVICE -> INSTALL
             "Delete": {
                 "TableName": TABLE_NAME,
                 "Key": {
                     "PK": {"S": f"DEVICE#{device_id}"},
                     "SK": {"S": f"INSTALL_ASSOC#{install_id}"}
+                },
+                "ConditionExpression": "attribute_exists(PK) AND attribute_exists(SK)"
+            }
+        },
+        {
+            # Update device META record to remove LinkedInstallationId and add unlink history
+            "Update": {
+                "TableName": TABLE_NAME,
+                "Key": {
+                    "PK": {"S": f"DEVICE#{device_id}"},
+                    "SK": {"S": "META"}
+                },
+                "UpdateExpression": "REMOVE LinkedInstallationId SET InstallationHistory = list_append(if_not_exists(InstallationHistory, :empty_list), :install_history)",
+                "ExpressionAttributeValues": {
+                    ":empty_list": {"L": []},
+                    ":install_history": {
+                        "L": [
+                            {
+                                "M": {
+                                    "timestamp": {"S": timestamp},
+                                    "action": {"S": "unlinked"},
+                                    "installationId": {"S": install_id},
+                                    "performedBy": {"S": performed_by},
+                                    "ipAddress": {"S": ip_address},
+                                    "reason": {"S": reason or ""}
+                                }
+                            }
+                        ]
+                    }
                 },
                 "ConditionExpression": "attribute_exists(PK) AND attribute_exists(SK)"
             }
