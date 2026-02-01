@@ -293,10 +293,13 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/
 ```
 
 ### POST /devices
-**Description:** Create new device (EntityType and DeviceId required)  
-**Note:** Duplicate prevention is enabled - attempting to create a device with an existing DeviceId will return 409 Conflict.
+**Description:** Create new device (EntityType required, DeviceId optional)  
+**Note:** 
+- DeviceId is auto-generated as `DEV-{UUID}` if not provided (e.g., `DEV-A1B2C3D4`)
+- `devicenum` field captures the device's IMEI or unique identifier (e.g., IMEI for cellular devices)
+- Duplicate prevention is enabled - attempting to create a device with an existing DeviceId will return 409 Conflict.
 
-**Request:**
+**Request (with DeviceId):**
 ```bash
 curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices \
   -H "Content-Type: application/json" \
@@ -306,8 +309,24 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices
     "DeviceName": "New Water Sensor",
     "DeviceType": "Water Monitor",
     "SerialNumber": "SN999888777",
+    "devicenum": "867123456789012",
     "Status": "available",
     "Location": "Warehouse A"
+  }'
+```
+
+**Request (auto-generate DeviceId):**
+```bash
+curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices \
+  -H "Content-Type: application/json" \
+  -d '{
+    "EntityType": "DEVICE",
+    "DeviceName": "Auto-Generated Device",
+    "DeviceType": "Water Monitor",
+    "SerialNumber": "SN123456789",
+    "devicenum": "867987654321098",
+    "Status": "available",
+    "Location": "Warehouse B"
   }'
 ```
 
@@ -3107,24 +3126,49 @@ curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/instal
 ```
 
 ### POST /installs
-**Description:** Create a new installation with location hierarchy  
-**Request:**
+**Description:** Create a new installation with location hierarchy and optional device linking  
+**Features:**
+- Auto-generates UUID installation ID
+- Validates region IDs (State, District, Mandal, Village, Habitation)
+- Syncs region hierarchy to Thingsboard assets
+- Optional device linking during creation
+- Automatic Thingsboard habitation linking for devices
+- Uses fallback habitation assets when API issues occur
+
+**Request (Basic):**
 ```bash
 curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs" \
   -H "Content-Type: application/json" \
   -d '{
-    "installationId": "INST-HAB-001",
-    "stateId": "STATE-001",
-    "districtId": "DIST-001",
-    "mandalId": "MANDAL-001",
-    "villageId": "VILLAGE-001",
-    "habitationId": "HAB-001",
-    "primaryDevice": "water",
-    "status": "active",
-    "installationDate": "2026-01-29T00:00:00.000Z",
-    "customerId": "CUST-001",
-    "templateId": "TMPL-001",
-    "warrantyDate": "2027-01-29T00:00:00.000Z"
+    "StateId": "TS",
+    "DistrictId": "HYD",
+    "MandalId": "SRNAGAR",
+    "VillageId": "VILLAGE001",
+    "HabitationId": "005",
+    "PrimaryDevice": "water",
+    "Status": "active",
+    "InstallationDate": "2026-01-31T00:00:00.000Z"
+  }'
+```
+
+**Request (With Optional Fields):**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "StateId": "TS",
+    "DistrictId": "HYD",
+    "MandalId": "SRNAGAR",
+    "VillageId": "VILLAGE001",
+    "HabitationId": "005",
+    "PrimaryDevice": "water",
+    "Status": "active",
+    "InstallationDate": "2026-01-31T00:00:00.000Z",
+    "CustomerId": "CUST-001",
+    "TemplateId": "TMPL-001",
+    "WarrantyDate": "2027-01-31T00:00:00.000Z",
+    "CreatedBy": "admin@example.com",
+    "deviceIds": ["DEV001", "DEV002"]
   }'
 ```
 
@@ -3132,44 +3176,113 @@ curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/instal
 ```json
 {
   "created": {
-    "PK": "INSTALL#INST-HAB-001",
+    "PK": "INSTALL#a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "SK": "META",
     "EntityType": "INSTALL",
-    "InstallationId": "INST-HAB-001",
-    "StateId": "STATE-001",
-    "DistrictId": "DIST-001",
-    "MandalId": "MANDAL-001",
-    "VillageId": "VILLAGE-001",
-    "HabitationId": "HAB-001",
+    "InstallationId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "StateId": "TS",
+    "DistrictId": "HYD",
+    "MandalId": "SRNAGAR",
+    "VillageId": "VILLAGE001",
+    "HabitationId": "005",
+    "stateName": "Telangana",
+    "districtName": "Hyderabad",
+    "mandalName": "Srikakulam Nagar",
+    "villageName": "Village 001",
+    "habitationName": "Habitation 005",
     "PrimaryDevice": "water",
     "Status": "active",
-    "InstallationDate": "2026-01-29T00:00:00.000Z",
+    "InstallationDate": "2026-01-31T00:00:00.000Z",
     "CustomerId": "CUST-001",
     "TemplateId": "TMPL-001",
-    "WarrantyDate": "2027-01-29T00:00:00.000Z",
-    "CreatedDate": "2026-01-29T07:21:27.552251Z",
-    "UpdatedDate": "2026-01-29T07:21:27.552251Z",
-    "CreatedBy": "system",
-    "UpdatedBy": "system"
+    "WarrantyDate": "2027-01-31T00:00:00.000Z",
+    "CreatedDate": "2026-01-31T10:30:00.000Z",
+    "UpdatedDate": "2026-01-31T10:30:00.000Z",
+    "CreatedBy": "admin@example.com",
+    "UpdatedBy": "admin@example.com",
+    "thingsboardStatus": "synced",
+    "thingsboardAssets": {
+      "state": {
+        "id": "fb123abc-4567-8901-def0-123456789abc",
+        "name": "Telangana"
+      },
+      "district": {
+        "id": "cd456def-7890-1234-abc5-678901234def",
+        "name": "Hyderabad"
+      },
+      "mandal": {
+        "id": "ef789012-3456-7890-bcd1-234567890abc",
+        "name": "Srikakulam Nagar"
+      },
+      "village": {
+        "id": "12345678-9012-3456-cde7-890123456789",
+        "name": "Village 001"
+      },
+      "habitation": {
+        "id": "90123456-7890-1234-def8-901234567890",
+        "name": "Habitation 005"
+      }
+    }
+  },
+  "deviceLinking": {
+    "linked": [
+      {
+        "deviceId": "DEV001",
+        "status": "linked",
+        "thingsboardLinked": true
+      },
+      {
+        "deviceId": "DEV002",
+        "status": "linked",
+        "thingsboardLinked": true
+      }
+    ],
+    "errors": []
   }
 }
 ```
 
 **Required Fields:**
-- `installationId` - Unique identifier for the installation
-- `stateId` - State identifier
-- `districtId` - District identifier
-- `mandalId` - Mandal identifier
-- `villageId` - Village identifier
-- `habitationId` - Habitation identifier
-- `primaryDevice` - Must be "water", "chlorine", or "none"
-- `status` - Must be "active" or "inactive"
-- `installationDate` - ISO 8601 date string
+- `StateId` - State identifier (validated against regions table)
+- `DistrictId` - District identifier (validated against regions table)
+- `MandalId` - Mandal identifier (validated against regions table)
+- `VillageId` - Village identifier (validated against regions table)
+- `HabitationId` - Habitation identifier (validated against regions table)
+- `PrimaryDevice` - Must be `"water"`, `"chlorine"`, or `"none"`
+- `Status` - Must be `"active"` or `"inactive"`
+- `InstallationDate` - ISO 8601 date string
 
 **Optional Fields:**
-- `customerId` - Customer reference
-- `templateId` - Template reference
-- `warrantyDate` - ISO 8601 date string
+- `CustomerId` - Customer reference ID (validated if provided)
+- `TemplateId` - Template reference ID (validated if provided)
+- `WarrantyDate` - ISO 8601 date string
+- `CreatedBy` - User who created the installation (defaults to `"system"`)
+- `deviceIds` - Array of device IDs to link during creation (e.g., `["DEV001", "DEV002"]`)
+
+**Auto-Generated Fields:**
+- `InstallationId` - UUID automatically generated by the system
+- `EntityType` - Always set to `"INSTALL"`
+- `CreatedDate` - Auto-generated timestamp
+- `UpdatedDate` - Auto-generated timestamp
+- `UpdatedBy` - Initially same as CreatedBy
+- Region names (`stateName`, `districtName`, `mandalName`, `villageName`, `habitationName`)
+- `thingsboardStatus` - Status of Thingsboard sync
+- `thingsboardAssets` - Asset IDs created in Thingsboard
+
+**Validation Rules:**
+- All region IDs must exist in the regions table
+- CustomerId must exist in customers table (if provided)
+- TemplateId must exist in templates table (if provided)
+- Device IDs must exist and not be linked to another installation
+- PrimaryDevice accepts only: `"water"`, `"chlorine"`, or `"none"`
+- Status accepts only: `"active"` or `"inactive"`
+
+**Thingsboard Integration:**
+- Creates hierarchical region assets (State → District → Mandal → Village → Habitation)
+- Creates "contains" relations between region levels
+- Links devices to habitation asset automatically
+- Uses fallback habitation IDs when API creation fails
+- Non-blocking - installation succeeds even if Thingsboard sync fails
 
 ### PUT /installs/{installId}
 **Description:** Update installation details  

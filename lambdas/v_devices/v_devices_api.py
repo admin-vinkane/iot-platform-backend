@@ -3,6 +3,7 @@ import os
 import boto3
 import logging
 import re
+import uuid
 from datetime import datetime
 from decimal import Decimal
 import decimal
@@ -31,6 +32,7 @@ class DeviceMeta(BaseModel):
     DeviceName: str
     DeviceType: str
     SerialNumber: str
+    devicenum: str = None  # IMEI or unique device identifier
     Status: str
     Location: str
     EntityType: str
@@ -186,7 +188,20 @@ ENTITY_MODEL_MAP = {
 }
 
 def fetch_region_names(state_id=None, district_id=None, mandal_id=None, village_id=None, habitation_id=None):
-    """Fetch region names from regions table
+    """Fetch region names from v_regions_dev table
+    
+    The table uses a hierarchical structure:
+    - STATE#<code> contains districts as SK entries
+    - DISTRICT#<code> contains mandals as SK entries  
+    - MANDAL#<code> contains villages as SK entries
+    - VILLAGE#<code> contains habitations as SK entries
+    
+    Query patterns:
+    - State "TS": PK=STATE#TS, SK=STATE#TS
+    - District "RAN" under TS: PK=STATE#TS, SK=DISTRICT#RAN
+    - Mandal "AMAN" under RAN: PK=DISTRICT#RAN, SK=MANDAL#AMAN
+    - Village "AK1012" under AMAN: PK=MANDAL#AMAN, SK=VILLAGE#AK1012
+    - Habitation "AK1012_H1" under AK1012: PK=VILLAGE#AK1012, SK=HABITATION#AK1012_H1
     
     Returns a dict with stateName, districtName, mandalName, villageName, habitationName
     """
@@ -196,9 +211,8 @@ def fetch_region_names(state_id=None, district_id=None, mandal_id=None, village_
         regions_table = dynamodb.Table(os.environ.get("REGIONS_TABLE", "v_regions_dev"))
         logger.info(f"fetch_region_names called with: state_id={state_id}, district_id={district_id}, mandal_id={mandal_id}, village_id={village_id}, habitation_id={habitation_id}")
         
-        # For STATE: Try both with and without STATE# prefix
+        # For STATE
         if state_id:
-            # Try original state_id first
             state_key = state_id.replace("STATE-", "").replace("STATE#", "")  # Strip prefixes
             logger.info(f"Looking up STATE: PK=STATE#{state_key}, SK=STATE#{state_key}")
             response = regions_table.get_item(
@@ -210,7 +224,7 @@ def fetch_region_names(state_id=None, district_id=None, mandal_id=None, village_
             else:
                 logger.warning(f"State not found: STATE#{state_key}")
         
-        # For DISTRICT: Try to find with parent state
+        # For DISTRICT - parent is STATE
         if district_id and state_id:
             state_key = state_id.replace("STATE-", "").replace("STATE#", "")
             district_key = district_id.replace("DIST-", "").replace("DISTRICT#", "")
@@ -222,37 +236,49 @@ def fetch_region_names(state_id=None, district_id=None, mandal_id=None, village_
                 region_names["districtName"] = response["Item"].get("RegionName")
                 logger.info(f"Found district: {region_names['districtName']}")
             else:
-                logger.warning(f"District not found: STATE#{state_key}, DISTRICT#{district_key}")
+                logger.warning(f"District not found under STATE#{state_key}: DISTRICT#{district_key}")
         
-        # For MANDAL: Try to find with parent district
+        # For MANDAL - parent is DISTRICT
         if mandal_id and district_id:
             district_key = district_id.replace("DIST-", "").replace("DISTRICT#", "")
             mandal_key = mandal_id.replace("MANDAL-", "").replace("MANDAL#", "")
+            logger.info(f"Looking up MANDAL: PK=DISTRICT#{district_key}, SK=MANDAL#{mandal_key}")
             response = regions_table.get_item(
                 Key={"PK": f"DISTRICT#{district_key}", "SK": f"MANDAL#{mandal_key}"}
             )
             if "Item" in response:
                 region_names["mandalName"] = response["Item"].get("RegionName")
+                logger.info(f"Found mandal: {region_names['mandalName']}")
+            else:
+                logger.warning(f"Mandal not found under DISTRICT#{district_key}: MANDAL#{mandal_key}")
         
-        # For VILLAGE: Try to find with parent mandal
+        # For VILLAGE - parent is MANDAL
         if village_id and mandal_id:
             mandal_key = mandal_id.replace("MANDAL-", "").replace("MANDAL#", "")
             village_key = village_id.replace("VILLAGE-", "").replace("VILLAGE#", "")
+            logger.info(f"Looking up VILLAGE: PK=MANDAL#{mandal_key}, SK=VILLAGE#{village_key}")
             response = regions_table.get_item(
                 Key={"PK": f"MANDAL#{mandal_key}", "SK": f"VILLAGE#{village_key}"}
             )
             if "Item" in response:
                 region_names["villageName"] = response["Item"].get("RegionName")
+                logger.info(f"Found village: {region_names['villageName']}")
+            else:
+                logger.warning(f"Village not found under MANDAL#{mandal_key}: VILLAGE#{village_key}")
         
-        # For HABITATION: Try to find with parent village
+        # For HABITATION - parent is VILLAGE
         if habitation_id and village_id:
             village_key = village_id.replace("VILLAGE-", "").replace("VILLAGE#", "")
             habitation_key = habitation_id.replace("HAB-", "").replace("HABITATION#", "")
+            logger.info(f"Looking up HABITATION: PK=VILLAGE#{village_key}, SK=HABITATION#{habitation_key}")
             response = regions_table.get_item(
                 Key={"PK": f"VILLAGE#{village_key}", "SK": f"HABITATION#{habitation_key}"}
             )
             if "Item" in response:
                 region_names["habitationName"] = response["Item"].get("RegionName")
+                logger.info(f"Found habitation: {region_names['habitationName']}")
+            else:
+                logger.warning(f"Habitation not found under VILLAGE#{village_key}: HABITATION#{habitation_key}")
     
     except Exception as e:
         logger.warning(f"Failed to fetch region names: {str(e)}")
@@ -324,7 +350,7 @@ def lambda_handler(event, context):
                 return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
             
             # Validate required fields
-            required_fields = ["InstallationId", "StateId", "DistrictId", "MandalId", "VillageId", "HabitationId", "PrimaryDevice", "Status", "InstallationDate"]
+            required_fields = ["StateId", "DistrictId", "MandalId", "VillageId", "HabitationId", "PrimaryDevice", "Status", "InstallationDate"]
             missing_fields = [field for field in required_fields if not body.get(field)]
             if missing_fields:
                 return ErrorResponse.build(f"Missing required fields: {', '.join(missing_fields)}", 400)
@@ -376,9 +402,47 @@ def lambda_handler(event, context):
                 except Exception as e:
                     logger.warning(f"Region validation skipped for {region_type}: {str(e)}")
             
+            # Check for duplicate installation (same region combination)
+            state_id = body.get("StateId")
+            district_id = body.get("DistrictId")
+            mandal_id = body.get("MandalId")
+            village_id = body.get("VillageId")
+            habitation_id = body.get("HabitationId")
+            
+            logger.info(f"Checking for existing installation: State={state_id}, District={district_id}, Mandal={mandal_id}, Village={village_id}, Habitation={habitation_id}")
+            
+            try:
+                # Scan for installations with matching region combination
+                # Use a filter expression to find matching installations
+                response = table.scan(
+                    FilterExpression="EntityType = :entity_type AND StateId = :state AND DistrictId = :district AND MandalId = :mandal AND VillageId = :village AND HabitationId = :habitation",
+                    ExpressionAttributeValues={
+                        ":entity_type": "INSTALL",
+                        ":state": state_id,
+                        ":district": district_id,
+                        ":mandal": mandal_id,
+                        ":village": village_id,
+                        ":habitation": habitation_id
+                    }
+                )
+                
+                existing_installations = response.get("Items", [])
+                
+                if existing_installations:
+                    existing_id = existing_installations[0].get("InstallationId")
+                    logger.warning(f"Duplicate installation found: {existing_id} for region combination {state_id}/{district_id}/{mandal_id}/{village_id}/{habitation_id}")
+                    return ErrorResponse.build(
+                        f"Installation already exists for this region combination (InstallationId: {existing_id}). "
+                        f"State: {state_id}, District: {district_id}, Mandal: {mandal_id}, Village: {village_id}, Habitation: {habitation_id}",
+                        409  # Conflict status code
+                    )
+            except Exception as dup_check_error:
+                logger.error(f"Error checking for duplicate installations: {str(dup_check_error)}")
+                # Continue with creation - don't fail on duplicate check error
+            
             # Create installation record
             try:
-                installation_id = body.get("InstallationId")
+                installation_id = str(uuid.uuid4())
                 timestamp = datetime.utcnow().isoformat() + "Z"
                 created_by = body.get("CreatedBy", "system")
                 
@@ -425,11 +489,120 @@ def lambda_handler(event, context):
                 )
                 response_data.update(region_names)
                 
+                # Sync region assets to Thingsboard (non-blocking)
+                try:
+                    from shared.thingsboard_utils import sync_installation_regions_to_thingsboard
+                    
+                    logger.info(f"Syncing installation regions to Thingsboard for installation {installation_id}")
+                    logger.info(f"Installation data keys: {list(response_data.keys())}")
+                    logger.info(f"Installation data: {response_data}")
+                    
+                    # Sync all regions (state, district, mandal, village, habitation)
+                    sync_results = sync_installation_regions_to_thingsboard(response_data)
+                    
+                    logger.info(f"Thingsboard sync results: {sync_results}")
+                    
+                    response_data["thingsboardStatus"] = "synced"
+                    response_data["thingsboardAssets"] = sync_results
+                    
+                    if sync_results.get("errors"):
+                        logger.warning(f"Thingsboard sync had errors: {sync_results['errors']}")
+                        response_data["thingsboardStatus"] = "partial"
+                        response_data["thingsboardErrors"] = sync_results["errors"]
+                    else:
+                        logger.info(f"Successfully synced all regions to Thingsboard for installation {installation_id}")
+                    
+                    # Save thingsboardAssets back to DynamoDB so device linking can access it
+                    try:
+                        table.update_item(
+                            Key={"PK": f"INSTALL#{installation_id}", "SK": "META"},
+                            UpdateExpression="SET thingsboardAssets = :assets, thingsboardStatus = :status",
+                            ExpressionAttributeValues={
+                                ":assets": sync_results,
+                                ":status": response_data["thingsboardStatus"]
+                            }
+                        )
+                        logger.info(f"Saved thingsboardAssets to installation record")
+                    except Exception as update_error:
+                        logger.error(f"Failed to save thingsboardAssets to DynamoDB: {str(update_error)}")
+                        
+                except Exception as e:
+                    logger.error(f"Thingsboard sync failed (non-blocking): {str(e)}", exc_info=True)
+                    response_data["thingsboardStatus"] = "error"
+                    response_data["thingsboardError"] = str(e)
+                
+                # Link devices if provided in request (called from UI)
+                device_ids = body.get("deviceIds", [])
+                if device_ids:
+                    logger.info(f"Linking {len(device_ids)} devices to installation {installation_id}")
+                
+                    device_link_results = []
+                    device_link_errors = []
+                
+                    for device_id in device_ids:
+                        try:
+                            # Validate device exists
+                            device_response = table.get_item(
+                                Key={"PK": f"DEVICE#{device_id}", "SK": "META"}
+                            )
+                            if "Item" not in device_response:
+                                device_link_errors.append({"deviceId": device_id, "error": "Device not found"})
+                                continue
+                        
+                            # Execute the device link transaction
+                            performed_by = body.get("CreatedBy", "system")
+                            ip_address = get_client_ip(event)
+                            reason = "Linked during installation creation"
+                        
+                            success, transaction_error = execute_install_device_link_transaction(
+                                installation_id, device_id, performed_by, ip_address, reason
+                            )
+                        
+                            if success:
+                                # Link device to habitation asset in Thingsboard (non-blocking)
+                                try:
+                                    from shared.thingsboard_utils import link_device_to_habitation
+                                
+                                    # Get habitation asset ID from installation
+                                    install_response = table.get_item(Key={"PK": f"INSTALL#{installation_id}", "SK": "META"})
+                                    if "Item" in install_response:
+                                        installation = install_response["Item"]
+                                        thingsboard_assets = installation.get("thingsboardAssets")
+                                        habitation_id = None
+                                    
+                                        if isinstance(thingsboard_assets, dict):
+                                            habitation_id = thingsboard_assets.get("habitation", {}).get("id")
+                                    
+                                        if habitation_id:
+                                            logger.info(f"Linking device {device_id} to habitation {habitation_id} in Thingsboard")
+                                            link_success = link_device_to_habitation(device_id, habitation_id)
+                                            if link_success:
+                                                logger.info(f"Successfully linked device {device_id} to habitation in Thingsboard")
+                                            else:
+                                                logger.warning(f"Failed to link device {device_id} to habitation in Thingsboard (non-blocking)")
+                                except Exception as e:
+                                    logger.warning(f"Thingsboard device linking failed (non-blocking): {str(e)}", exc_info=True)
+                            
+                                device_link_results.append({"deviceId": device_id, "status": "linked"})
+                            else:
+                                device_link_errors.append({"deviceId": device_id, "error": transaction_error})
+                    
+                        except Exception as e:
+                            logger.error(f"Error linking device {device_id}: {str(e)}", exc_info=True)
+                            device_link_errors.append({"deviceId": device_id, "error": str(e)})
+                
+                    # Add device linking results to response
+                    response_data["deviceLinking"] = {
+                        "linked": device_link_results,
+                        "errors": device_link_errors if device_link_errors else []
+                    }
+                
+                    logger.info(f"Device linking complete: {len(device_link_results)} linked, {len(device_link_errors)} failed")
+                
                 return SuccessResponse.build({
                     "message": "Installation created successfully",
                     "installation": response_data
                 }, 201)
-                
             except Exception as e:
                 logger.error(f"Error creating installation: {str(e)}")
                 return ErrorResponse.build(f"Error creating installation: {str(e)}", 500)
@@ -618,7 +791,6 @@ def lambda_handler(event, context):
                 return ErrorResponse.build(f"Error validating device: {str(e)}", 500)
             
             # Generate repair ID
-            import uuid
             repair_id = body.get("repairId") or f"REP{str(uuid.uuid4())[:8].upper()}"
             timestamp = datetime.utcnow().isoformat() + "Z"
             
@@ -649,197 +821,253 @@ def lambda_handler(event, context):
             except Exception as e:
                 logger.error(f"Error creating repair: {str(e)}")
                 return ErrorResponse.build(f"Error creating repair: {str(e)}", 500)
-    
-    # Check if this is a PUT /devices/{deviceId}/repairs/{repairId} request
-    if path_parameters.get("deviceId") and path_parameters.get("repairId") and "/repairs" in path and method == "PUT":
-        device_id = path_parameters.get("deviceId")
-        repair_id = path_parameters.get("repairId")
-        logger.info(f"Updating repair {repair_id} for device {device_id}")
-        
-        try:
-            body = json.loads(event.get("body", "{}"))
-        except Exception as e:
-            logger.error(f"Failed to parse body: {e}")
-            return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
-        
-        # Query for the repair record
-        try:
-            response = table.query(
-                KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
-                ExpressionAttributeValues={
-                    ":pk": f"DEVICE#{device_id}",
-                    ":sk": f"REPAIR#{repair_id}"
-                }
-            )
-            items = response.get("Items", [])
-            if not items:
-                return ErrorResponse.build(f"Repair {repair_id} not found for device {device_id}", 404)
+
+        # Check if this is a PUT /devices/{deviceId}/repairs/{repairId} request
+        if path_parameters.get("deviceId") and path_parameters.get("repairId") and "/repairs" in path and method == "PUT":
+            device_id = path_parameters.get("deviceId")
+            repair_id = path_parameters.get("repairId")
+            logger.info(f"Updating repair {repair_id} for device {device_id}")
             
-            repair_item = items[0]
-        except Exception as e:
-            logger.error(f"Error querying repair: {str(e)}")
-            return ErrorResponse.build(f"Error retrieving repair: {str(e)}", 500)
-        
-        # Update allowed fields
-        updatable_fields = {
-            "Description": "description",
-            "Cost": "cost",
-            "Technician": "technician",
-            "Status": "status"
-        }
-        
-        # Apply updates
-        for db_field, request_field in updatable_fields.items():
-            if request_field in body:
-                repair_item[db_field] = body[request_field]
-        
-        # Update metadata
-        repair_item["UpdatedDate"] = datetime.utcnow().isoformat() + "Z"
-        repair_item["UpdatedBy"] = body.get("updatedBy", "system")
-        
-        try:
-            table.put_item(Item=repair_item)
-            logger.info(f"Updated repair {repair_id} for device {device_id}")
-            return SuccessResponse.build({
-                "message": "Repair record updated successfully",
-                "repair": simplify(repair_item)
-            }, 200)
-        except Exception as e:
-            logger.error(f"Error updating repair: {str(e)}")
-            return ErrorResponse.build(f"Error updating repair: {str(e)}", 500)
-    
-    # Check if this is a /installs/{installId}/devices/link request
-    install_id_check = path_parameters.get("installId")
-    link_in_path = "/devices/link" in path
-    logger.debug(f"POST link check: path={path}, installId={install_id_check}, '/devices/link' in path: {link_in_path}, combined: {install_id_check and link_in_path}")
-    if path_parameters.get("installId") and "/devices/link" in path:
-        install_id = path_parameters.get("installId")
-        logger.info(f"Linking device(s) to install: {install_id}")
-        
-        try:
-            body = json.loads(event.get("body", "{}"))
-        except Exception as e:
-            logger.error(f"Failed to parse body: {e}")
-            return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
-        
-        # Support both single deviceId and array of deviceIds
-        device_ids = body.get("deviceIds") or ([body.get("deviceId")] if body.get("deviceId") else [])
-        if not device_ids:
-            return ErrorResponse.build("deviceId or deviceIds array is required in request body", 400)
-        
-        performed_by = body.get("performedBy", "system")
-        reason = body.get("reason")
-        ip_address = get_client_ip(event)
-        
-        # Validate install exists
-        is_valid, error_msg = validate_install_exists(install_id)
-        if not is_valid:
-            return ErrorResponse.build(error_msg, 404)
-        
-        # Link each device
-        results = []
-        errors = []
-        
-        for device_id in device_ids:
-            # Validate device format
-            if not re.match(r"^[A-Za-z0-9_-]{1,64}$", device_id):
-                errors.append({"deviceId": device_id, "error": "Invalid deviceId format"})
-                continue
+            try:
+                body = json.loads(event.get("body", "{}"))
+            except Exception as e:
+                logger.error(f"Failed to parse body: {e}")
+                return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
             
-            # Validate device exists
-            is_valid, error_msg = validate_device_exists(device_id)
+            # Query for the repair record
+            try:
+                response = table.query(
+                    KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                    ExpressionAttributeValues={
+                        ":pk": f"DEVICE#{device_id}",
+                        ":sk": f"REPAIR#{repair_id}"
+                    }
+                )
+                items = response.get("Items", [])
+                if not items:
+                    return ErrorResponse.build(f"Repair {repair_id} not found for device {device_id}", 404)
+                
+                repair_item = items[0]
+            except Exception as e:
+                logger.error(f"Error querying repair: {str(e)}")
+                return ErrorResponse.build(f"Error retrieving repair: {str(e)}", 500)
+            
+            # Update allowed fields
+            updatable_fields = {
+                "Description": "description",
+                "Cost": "cost",
+                "Technician": "technician",
+                "Status": "status"
+            }
+            
+            # Apply updates
+            for db_field, request_field in updatable_fields.items():
+                if request_field in body:
+                    repair_item[db_field] = body[request_field]
+            
+            # Update metadata
+            repair_item["UpdatedDate"] = datetime.utcnow().isoformat() + "Z"
+            repair_item["UpdatedBy"] = body.get("updatedBy", "system")
+            
+            try:
+                table.put_item(Item=repair_item)
+                logger.info(f"Updated repair {repair_id} for device {device_id}")
+                return SuccessResponse.build({
+                    "message": "Repair record updated successfully",
+                    "repair": simplify(repair_item)
+                }, 200)
+            except Exception as e:
+                logger.error(f"Error updating repair: {str(e)}")
+                return ErrorResponse.build(f"Error updating repair: {str(e)}", 500)
+
+        # Check if this is a /installs/{installId}/devices/link request
+        install_id_check = path_parameters.get("installId")
+        link_in_path = "/devices/link" in path
+        logger.debug(f"POST link check: path={path}, installId={install_id_check}, '/devices/link' in path: {link_in_path}, combined: {install_id_check and link_in_path}")
+        if path_parameters.get("installId") and "/devices/link" in path:
+            install_id = path_parameters.get("installId")
+            logger.info(f"Linking device(s) to install: {install_id}")
+            
+            try:
+                body = json.loads(event.get("body", "{}"))
+            except Exception as e:
+                logger.error(f"Failed to parse body: {e}")
+                return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
+            
+            # Support both single deviceId and array of deviceIds
+            device_ids = body.get("deviceIds") or ([body.get("deviceId")] if body.get("deviceId") else [])
+            if not device_ids:
+                return ErrorResponse.build("deviceId or deviceIds array is required in request body", 400)
+            
+            performed_by = body.get("performedBy", "system")
+            reason = body.get("reason")
+            ip_address = get_client_ip(event)
+            
+            # Validate install exists
+            is_valid, error_msg = validate_install_exists(install_id)
             if not is_valid:
-                errors.append({"deviceId": device_id, "error": error_msg})
-                continue
+                return ErrorResponse.build(error_msg, 404)
             
-            # Check if already linked
-            if check_device_install_link(device_id, install_id):
-                errors.append({"deviceId": device_id, "error": f"Device already linked to install {install_id}"})
-                continue
+            # Link each device
+            results = []
+            errors = []
             
-            # Execute link transaction
-            success, transaction_error = execute_install_device_link_transaction(
-                install_id, device_id, performed_by, ip_address, reason
-            )
+            for device_id in device_ids:
+                # Validate device format
+                if not re.match(r"^[A-Za-z0-9_-]{1,64}$", device_id):
+                    errors.append({"deviceId": device_id, "error": "Invalid deviceId format"})
+                    continue
+                
+                # Validate device exists
+                is_valid, error_msg = validate_device_exists(device_id)
+                if not is_valid:
+                    errors.append({"deviceId": device_id, "error": error_msg})
+                    continue
+                
+                # Check if already linked
+                if check_device_install_link(device_id, install_id):
+                    errors.append({"deviceId": device_id, "error": f"Device already linked to install {install_id}"})
+                    continue
+                
+                # Execute link transaction
+                success, transaction_error = execute_install_device_link_transaction(
+                    install_id, device_id, performed_by, ip_address, reason
+                )
+                
+                if success:
+                    # Link device to habitation asset in Thingsboard (non-blocking)
+                    try:
+                        from shared.thingsboard_utils import link_device_to_habitation
+                        
+                        # Get installation to find habitation asset ID
+                        install_response = table.get_item(Key={"PK": f"INSTALL#{install_id}", "SK": "META"})
+                        if "Item" in install_response:
+                            installation = install_response["Item"]
+                            thingsboard_assets = installation.get("thingsboardAssets")
+                            habitation_id = None
+                            
+                            if isinstance(thingsboard_assets, dict):
+                                habitation_id = thingsboard_assets.get("habitation", {}).get("id")
+                            
+                            if habitation_id:
+                                logger.info(f"Linking device {device_id} to habitation {habitation_id} in Thingsboard")
+                                link_success = link_device_to_habitation(device_id, habitation_id)
+                                if link_success:
+                                    logger.info(f"Successfully linked device {device_id} to habitation in Thingsboard")
+                                else:
+                                    logger.warning(f"Failed to link device {device_id} to habitation in Thingsboard (non-blocking)")
+                            else:
+                                logger.warning(f"Habitation asset not found for installation {install_id} (non-blocking)")
+                        else:
+                            logger.warning(f"Installation not found for Thingsboard linking {install_id} (non-blocking)")
+                    except Exception as e:
+                        logger.warning(f"Thingsboard device linking failed (non-blocking): {str(e)}", exc_info=True)
+                    
+                    results.append({"deviceId": device_id, "status": "linked"})
+                else:
+                    errors.append({"deviceId": device_id, "error": transaction_error})
             
-            if success:
-                results.append({"deviceId": device_id, "status": "linked"})
-            else:
-                errors.append({"deviceId": device_id, "error": transaction_error})
-        
-        response_data = {
-            "installId": install_id,
-            "linked": results,
-            "performedBy": performed_by,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        }
-        
-        if errors:
-            response_data["errors"] = errors
-        
-        status_code = 200 if results else 400
-        logger.info(f"Link operation complete: {len(results)} succeeded, {len(errors)} failed")
-        return SuccessResponse.build(response_data, status_code)
-    
-    # Check if this is a /installs/{installId}/devices/unlink request
-    if path_parameters.get("installId") and "/devices/unlink" in path:
-        install_id = path_parameters.get("installId")
-        logger.info(f"Unlinking device(s) from install: {install_id}")
-        
-        try:
-            body = json.loads(event.get("body", "{}"))
-        except Exception as e:
-            logger.error(f"Failed to parse body: {e}")
-            return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
-        
-        # Support both single deviceId and array of deviceIds
-        device_ids = body.get("deviceIds") or ([body.get("deviceId")] if body.get("deviceId") else [])
-        if not device_ids:
-            return ErrorResponse.build("deviceId or deviceIds array is required in request body", 400)
-        
-        performed_by = body.get("performedBy", "system")
-        reason = body.get("reason")
-        ip_address = get_client_ip(event)
-        
-        # Validate install exists
-        is_valid, error_msg = validate_install_exists(install_id)
-        if not is_valid:
-            return ErrorResponse.build(error_msg, 404)
-        
-        # Unlink each device
-        results = []
-        errors = []
-        
-        for device_id in device_ids:
-            # Validate device format
-            if not re.match(r"^[A-Za-z0-9_-]{1,64}$", device_id):
-                errors.append({"deviceId": device_id, "error": "Invalid deviceId format"})
-                continue
+            response_data = {
+                "installId": install_id,
+                "linked": results,
+                "performedBy": performed_by,
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            }
             
-            # Execute unlink transaction
-            success, transaction_error = execute_install_device_unlink_transaction(
-                install_id, device_id, performed_by, ip_address, reason
-            )
+            if errors:
+                response_data["errors"] = errors
             
-            if success:
-                results.append({"deviceId": device_id, "status": "unlinked"})
-            else:
-                errors.append({"deviceId": device_id, "error": transaction_error})
+            status_code = 200 if results else 400
+            logger.info(f"Link operation complete: {len(results)} succeeded, {len(errors)} failed")
+            return SuccessResponse.build(response_data, status_code)
         
-        response_data = {
-            "installId": install_id,
-            "unlinked": results,
-            "performedBy": performed_by,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        }
-        
-        if errors:
-            response_data["errors"] = errors
-        
-        status_code = 200 if results else 400
-        logger.info(f"Unlink operation complete: {len(results)} succeeded, {len(errors)} failed")
-        return SuccessResponse.build(response_data, status_code)
-        
+        # Check if this is a /installs/{installId}/devices/unlink request
+        if path_parameters.get("installId") and "/devices/unlink" in path:
+            install_id = path_parameters.get("installId")
+            logger.info(f"Unlinking device(s) from install: {install_id}")
+            
+            try:
+                body = json.loads(event.get("body", "{}"))
+            except Exception as e:
+                logger.error(f"Failed to parse body: {e}")
+                return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
+            
+            # Support both single deviceId and array of deviceIds
+            device_ids = body.get("deviceIds") or ([body.get("deviceId")] if body.get("deviceId") else [])
+            if not device_ids:
+                return ErrorResponse.build("deviceId or deviceIds array is required in request body", 400)
+            
+            performed_by = body.get("performedBy", "system")
+            reason = body.get("reason")
+            ip_address = get_client_ip(event)
+            
+            # Validate install exists
+            is_valid, error_msg = validate_install_exists(install_id)
+            if not is_valid:
+                return ErrorResponse.build(error_msg, 404)
+            
+            # Unlink each device
+            results = []
+            errors = []
+            
+            for device_id in device_ids:
+                # Validate device format
+                if not re.match(r"^[A-Za-z0-9_-]{1,64}$", device_id):
+                    errors.append({"deviceId": device_id, "error": "Invalid deviceId format"})
+                    continue
+                
+                # Execute unlink transaction
+                success, transaction_error = execute_install_device_unlink_transaction(
+                    install_id, device_id, performed_by, ip_address, reason
+                )
+                
+                if success:
+                    # Unlink device from habitation asset in Thingsboard (non-blocking)
+                    try:
+                        from shared.thingsboard_utils import unlink_device_from_habitation
+
+                        # Get installation to find habitation asset ID
+                        install_response = table.get_item(Key={"PK": f"INSTALL#{install_id}", "SK": "META"})
+                        if "Item" in install_response:
+                            installation = install_response["Item"]
+                            thingsboard_assets = installation.get("thingsboardAssets")
+                            habitation_id = None
+
+                            if isinstance(thingsboard_assets, dict):
+                                habitation_id = thingsboard_assets.get("habitation", {}).get("id")
+
+                            if habitation_id:
+                                logger.info(f"Unlinking device {device_id} from habitation {habitation_id} in Thingsboard")
+                                unlink_success = unlink_device_from_habitation(device_id, habitation_id)
+                                if unlink_success:
+                                    logger.info(f"Successfully unlinked device {device_id} from habitation in Thingsboard")
+                                else:
+                                    logger.warning(f"Failed to unlink device {device_id} from habitation in Thingsboard (non-blocking)")
+                            else:
+                                logger.warning(f"Habitation asset not found for installation {install_id} (non-blocking)")
+                        else:
+                            logger.warning(f"Installation not found for Thingsboard unlinking {install_id} (non-blocking)")
+                    except Exception as e:
+                        logger.warning(f"Thingsboard device unlinking failed (non-blocking): {str(e)}", exc_info=True)
+
+                    results.append({"deviceId": device_id, "status": "unlinked"})
+                else:
+                    errors.append({"deviceId": device_id, "error": transaction_error})
+            
+            response_data = {
+                "installId": install_id,
+                "unlinked": results,
+                "performedBy": performed_by,
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            }
+            
+            if errors:
+                response_data["errors"] = errors
+            
+            status_code = 200 if results else 400
+            logger.info(f"Unlink operation complete: {len(results)} succeeded, {len(errors)} failed")
+            return SuccessResponse.build(response_data, status_code)
+
         # Default POST handler for creating entities
         try:
             item = json.loads(event.get("body", "{}"))
@@ -853,11 +1081,14 @@ def lambda_handler(event, context):
         entity_type = item.get("EntityType")
         if not entity_type:
             return ErrorResponse.build("EntityType is required", 400)
-    
+
+        # Auto-generate DeviceId if not provided
         device_id = item.get("DeviceId")
         if not device_id:
-            return ErrorResponse.build("DeviceId is required", 400)
-    
+            device_id = f"DEV-{str(uuid.uuid4())[:8].upper()}"
+            item["DeviceId"] = device_id
+            logger.info(f"Auto-generated DeviceId: {device_id}")
+
         model = ENTITY_MODEL_MAP.get(entity_type)
         if not model:
             return ErrorResponse.build(f"Unknown EntityType: {entity_type}", 400)
@@ -905,7 +1136,7 @@ def lambda_handler(event, context):
         except Exception as e:
             logger.error(f"Insert error: {str(e)}")
             return ErrorResponse.build(f"Insert error: {str(e)}", 500)
-    
+
     elif method == "GET":
         # Extract path (HTTP API 2.0 uses rawPath, REST API uses path)
         path = event.get("path") or event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or ""
