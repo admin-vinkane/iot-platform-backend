@@ -1151,6 +1151,248 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs
 }
 ```
 
+---
+
+## 5. INSTALL-CONTACT LINKING API
+
+### POST /installs/{installId}/contacts/link
+**Description:** Link one or more customer contacts to an installation  
+**⚠️ Note:** Requires Terraform route `POST /installs/{installId}/contacts/link` to be configured  
+**Features:**
+- Links existing customer contacts to installations
+- Validates contacts belong to installation's customer
+- Batch linking support (up to 50 contacts)
+- Duplicate prevention
+- Atomic transactions
+
+**Prerequisites:**
+- Installation must have a `CustomerId`
+- Contacts must exist in the customer's contact list
+
+**Request (Single Contact):**
+```bash
+curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INS001/contacts/link \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactId": "CONTx1y2z3w4",
+    "performedBy": "admin@vinkane.com",
+    "reason": "Site manager assigned"
+  }'
+```
+
+**Request (Multiple Contacts):**
+```bash
+curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INS001/contacts/link \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactIds": ["CONTx1y2z3w4", "CONT9876abcd", "CONTabc123xy"],
+    "performedBy": "admin@vinkane.com",
+    "reason": "Installation team contacts"
+  }'
+```
+
+**Response (200 - Success):**
+```json
+{
+  "installId": "INS001",
+  "customerId": "CUSTa1b2c3d4",
+  "linked": [
+    {"contactId": "CONTx1y2z3w4", "status": "linked"},
+    {"contactId": "CONT9876abcd", "status": "linked"}
+  ],
+  "performedBy": "admin@vinkane.com",
+  "timestamp": "2026-02-01T10:30:00Z"
+}
+```
+
+**Response (200 - Partial Success):**
+```json
+{
+  "installId": "INS001",
+  "customerId": "CUSTa1b2c3d4",
+  "linked": [
+    {"contactId": "CONTx1y2z3w4", "status": "linked"}
+  ],
+  "errors": [
+    {"contactId": "CONT9876abcd", "error": "Contact CONT9876abcd is already linked to install INS001"},
+    {"contactId": "CONT_INVALID", "error": "Contact not found or doesn't belong to customer CUSTa1b2c3d4"}
+  ],
+  "performedBy": "admin@vinkane.com",
+  "timestamp": "2026-02-01T10:30:00Z"
+}
+```
+
+**Response (400) - Installation without CustomerId:**
+```json
+{
+  "error": "Installation INS001 does not have a CustomerId. Cannot link contacts."
+}
+```
+
+**Response (404) - Install not found:**
+```json
+{
+  "error": "Install INS001 not found"
+}
+```
+
+**Database Records Created:**
+```json
+// Association: INSTALL → CONTACT
+{
+  "PK": "INSTALL#INS001",
+  "SK": "CONTACT_ASSOC#CONTx1y2z3w4",
+  "EntityType": "INSTALL_CONTACT_ASSOC",
+  "InstallId": "INS001",
+  "ContactId": "CONTx1y2z3w4",
+  "CustomerId": "CUSTa1b2c3d4",
+  "Status": "active",
+  "LinkedDate": "2026-02-01T10:30:00Z",
+  "LinkedBy": "admin@vinkane.com",
+  "CreatedDate": "2026-02-01T10:30:00Z",
+  "UpdatedDate": "2026-02-01T10:30:00Z"
+}
+```
+
+### POST /installs/{installId}/contacts/unlink
+**Description:** Unlink one or more contacts from an installation  
+**⚠️ Note:** Requires Terraform route `POST /installs/{installId}/contacts/unlink` to be configured  
+
+**Request (Single Contact):**
+```bash
+curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INS001/contacts/unlink \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactId": "CONTx1y2z3w4",
+    "performedBy": "admin@vinkane.com",
+    "reason": "Contact reassigned"
+  }'
+```
+
+**Request (Multiple Contacts):**
+```bash
+curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INS001/contacts/unlink \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactIds": ["CONTx1y2z3w4", "CONT9876abcd"],
+    "performedBy": "admin@vinkane.com",
+    "reason": "Installation handover complete"
+  }'
+```
+
+**Response (200 - Success):**
+```json
+{
+  "installId": "INS001",
+  "unlinked": [
+    {"contactId": "CONTx1y2z3w4", "status": "unlinked"},
+    {"contactId": "CONT9876abcd", "status": "unlinked"}
+  ],
+  "performedBy": "admin@vinkane.com",
+  "timestamp": "2026-02-01T11:00:00Z"
+}
+```
+
+**Response (200 - Partial Success):**
+```json
+{
+  "installId": "INS001",
+  "unlinked": [
+    {"contactId": "CONTx1y2z3w4", "status": "unlinked"}
+  ],
+  "errors": [
+    {"contactId": "CONT9876abcd", "error": "Contact CONT9876abcd is not linked to install INS001"}
+  ],
+  "performedBy": "admin@vinkane.com",
+  "timestamp": "2026-02-01T11:00:00Z"
+}
+```
+
+### GET /installs/{installId}?includeContacts=true
+**Description:** Retrieve installation details with linked contacts  
+**Query Parameters:**
+- `includeContacts=true` - Include linked contact details (default: false)
+- `includeDevices=true` - Include linked device details (default: false)
+- `includeCustomer=true` - Include customer details (default: true)
+
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INS001?includeContacts=true"
+```
+
+**Response (200):**
+```json
+{
+  "installationId": "INS001",
+  "CustomerId": "CUSTa1b2c3d4",
+  "StateId": "TS",
+  "DistrictId": "HYD",
+  "MandalId": "SRNAGAR",
+  "VillageId": "VILLAGE001",
+  "HabitationId": "HAB001",
+  "PrimaryDevice": "water",
+  "Status": "active",
+  "InstallationDate": "2026-01-15T00:00:00.000Z",
+  "CreatedDate": "2026-01-15T08:00:00Z",
+  "UpdatedDate": "2026-02-01T10:30:00Z",
+  "linkedContacts": [
+    {
+      "contactId": "CONTx1y2z3w4",
+      "firstName": "John",
+      "lastName": "Doe",
+      "email": "john.doe@example.com",
+      "mobileNumber": "9876543210",
+      "designation": "Site Manager",
+      "customerId": "CUSTa1b2c3d4",
+      "linkedDate": "2026-02-01T10:30:00Z",
+      "linkedBy": "admin@vinkane.com",
+      "linkStatus": "active"
+    },
+    {
+      "contactId": "CONT9876abcd",
+      "firstName": "Jane",
+      "lastName": "Smith",
+      "email": "jane.smith@example.com",
+      "mobileNumber": "9876543211",
+      "designation": "Technical Lead",
+      "customerId": "CUSTa1b2c3d4",
+      "linkedDate": "2026-02-01T10:30:00Z",
+      "linkedBy": "admin@vinkane.com",
+      "linkStatus": "active"
+    }
+  ],
+  "linkedContactCount": 2,
+  "customer": {
+    "customerId": "CUSTa1b2c3d4",
+    "name": "Acme Corporation",
+    "companyName": "Acme Corp",
+    "email": "info@acme.com",
+    "phone": "9876543210"
+  },
+  "StateName": "Telangana",
+  "DistrictName": "Hyderabad",
+  "MandalName": "SR Nagar",
+  "VillageName": "Village 001",
+  "HabitationName": "Habitation 001"
+}
+```
+
+**Response (200 - No Contacts Linked):**
+```json
+{
+  "installationId": "INS001",
+  "CustomerId": "CUSTa1b2c3d4",
+  "StateId": "TS",
+  "DistrictId": "HYD",
+  "linkedContacts": [],
+  "linkedContactCount": 0
+}
+```
+
+---
+
+## 6. DEVICE-SIM LINKING API
+
 ### GET /devices/{deviceId}/sim
 **Description:** Get the currently linked SIM card for a device  
 **⚠️ Note:** Requires Terraform route `GET /devices/{deviceId}/sim` to be configured  

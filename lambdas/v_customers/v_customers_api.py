@@ -5,6 +5,7 @@ import logging
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from botocore.exceptions import ClientError
 from shared.response_utils import SuccessResponse, ErrorResponse
 from shared.encryption_utils import prepare_item_for_storage, prepare_item_for_response
 from pydantic import BaseModel, ValidationError
@@ -178,26 +179,92 @@ def lambda_handler(event, context):
             
             # GET /customers - List all customers
             if path in ["/customers", "/dev/customers"]:
-                response = table.scan()
+                scan_kwargs = {
+                    "FilterExpression": "SK = :sk",
+                    "ExpressionAttributeValues": {":sk": "ENTITY#CUSTOMER"}
+                }
+                
+                # Add pagination support
+                if query_parameters:
+                    if "limit" in query_parameters:
+                        scan_kwargs["Limit"] = int(query_parameters["limit"])
+                    if "lastEvaluatedKey" in query_parameters:
+                        # Decode the pagination token
+                        import base64
+                        scan_kwargs["ExclusiveStartKey"] = json.loads(base64.b64decode(query_parameters["lastEvaluatedKey"]))
+                
+                response = table.scan(**scan_kwargs)
                 items = response.get("Items", [])
-                # Filter only customer entities
-                customers = [simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=should_decrypt)) for item in items if item.get("SK") == "ENTITY#CUSTOMER"]
-                return SuccessResponse.build(customers)
+                customers = [simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=should_decrypt)) for item in items]
+                
+                # Add contact and address counts for each customer
+                for customer in customers:
+                    customer_id = customer.get("customerId")
+                    if customer_id:
+                        pk = f"CUSTOMER#{customer_id}"
+                        
+                        # Query contacts count
+                        contacts_response = table.query(
+                            KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                            ExpressionAttributeValues={
+                                ":pk": pk,
+                                ":sk": "ENTITY#CONTACT#"
+                            },
+                            Select="COUNT"
+                        )
+                        customer["contactCount"] = contacts_response.get("Count", 0)
+                        
+                        # Query addresses count
+                        addresses_response = table.query(
+                            KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+                            ExpressionAttributeValues={
+                                ":pk": pk,
+                                ":sk": "ENTITY#ADDRESS#"
+                            },
+                            Select="COUNT"
+                        )
+                        customer["addressCount"] = addresses_response.get("Count", 0)
+                
+                result = {"customers": customers}
+                
+                # Include pagination token if more results exist
+                if "LastEvaluatedKey" in response:
+                    import base64
+                    result["lastEvaluatedKey"] = base64.b64encode(json.dumps(response["LastEvaluatedKey"]).encode()).decode()
+                
+                return SuccessResponse.build(result)
             
             # GET /customers/{id}/contacts - List all contacts for a customer
             elif "id" in path_parameters and "/contacts" in path and "contactId" not in path_parameters:
                 customer_id = path_parameters["id"]
                 pk = f"CUSTOMER#{customer_id}"
                 
-                response = table.query(
-                    KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
-                    ExpressionAttributeValues={
+                query_kwargs = {
+                    "KeyConditionExpression": "PK = :pk AND begins_with(SK, :sk)",
+                    "ExpressionAttributeValues": {
                         ":pk": pk,
                         ":sk": "ENTITY#CONTACT#"
                     }
-                )
+                }
+                
+                # Add pagination support
+                if query_parameters:
+                    if "limit" in query_parameters:
+                        query_kwargs["Limit"] = int(query_parameters["limit"])
+                    if "lastEvaluatedKey" in query_parameters:
+                        import base64
+                        query_kwargs["ExclusiveStartKey"] = json.loads(base64.b64decode(query_parameters["lastEvaluatedKey"]))
+                
+                response = table.query(**query_kwargs)
                 contacts = [simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=should_decrypt)) for item in response.get("Items", [])]
-                return SuccessResponse.build(contacts)
+                
+                result = {"contacts": contacts}
+                
+                if "LastEvaluatedKey" in response:
+                    import base64
+                    result["lastEvaluatedKey"] = base64.b64encode(json.dumps(response["LastEvaluatedKey"]).encode()).decode()
+                
+                return SuccessResponse.build(result)
             
             # GET /customers/{id}/contacts/{contactId} - Get specific contact
             elif "id" in path_parameters and "contactId" in path_parameters:
@@ -217,15 +284,32 @@ def lambda_handler(event, context):
                 customer_id = path_parameters["id"]
                 pk = f"CUSTOMER#{customer_id}"
                 
-                response = table.query(
-                    KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
-                    ExpressionAttributeValues={
+                query_kwargs = {
+                    "KeyConditionExpression": "PK = :pk AND begins_with(SK, :sk)",
+                    "ExpressionAttributeValues": {
                         ":pk": pk,
                         ":sk": "ENTITY#ADDRESS#"
                     }
-                )
+                }
+                
+                # Add pagination support
+                if query_parameters:
+                    if "limit" in query_parameters:
+                        query_kwargs["Limit"] = int(query_parameters["limit"])
+                    if "lastEvaluatedKey" in query_parameters:
+                        import base64
+                        query_kwargs["ExclusiveStartKey"] = json.loads(base64.b64decode(query_parameters["lastEvaluatedKey"]))
+                
+                response = table.query(**query_kwargs)
                 addresses = [simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=should_decrypt)) for item in response.get("Items", [])]
-                return SuccessResponse.build(addresses)
+                
+                result = {"addresses": addresses}
+                
+                if "LastEvaluatedKey" in response:
+                    import base64
+                    result["lastEvaluatedKey"] = base64.b64encode(json.dumps(response["LastEvaluatedKey"]).encode()).decode()
+                
+                return SuccessResponse.build(result)
             
             # GET /customers/{id}/addresses/{addressId} - Get specific address
             elif "id" in path_parameters and "addressId" in path_parameters:
@@ -304,7 +388,7 @@ def lambda_handler(event, context):
                 data["PK"] = pk
                 data["SK"] = f"ENTITY#CONTACT#{contact_id}"
                 data["contactId"] = contact_id
-                timestamp = datetime.utcnow().isoformat()
+                timestamp = datetime.utcnow().isoformat() + "Z"
                 data["createdAt"] = timestamp
                 data["updatedAt"] = timestamp
                 if "createdBy" in data:
@@ -322,8 +406,8 @@ def lambda_handler(event, context):
                         Item=item,
                         ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)"
                     )
-                except Exception as e:
-                    if "ConditionalCheckFailedException" in str(e):
+                except ClientError as e:
+                    if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
                         logger.warning(f"Duplicate contact detected: {contact_id}")
                         return ErrorResponse.build(f"Contact {contact_id} already exists", 409)
                     logger.error(f"DynamoDB error: {str(e)}")
@@ -347,7 +431,7 @@ def lambda_handler(event, context):
                 data["PK"] = pk
                 data["SK"] = f"ENTITY#ADDRESS#{address_id}"
                 data["addressId"] = address_id
-                timestamp = datetime.utcnow().isoformat()
+                timestamp = datetime.utcnow().isoformat() + "Z"
                 data["createdAt"] = timestamp
                 data["updatedAt"] = timestamp
                 if "createdBy" in data:
@@ -365,8 +449,8 @@ def lambda_handler(event, context):
                         Item=item,
                         ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)"
                     )
-                except Exception as e:
-                    if "ConditionalCheckFailedException" in str(e):
+                except ClientError as e:
+                    if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
                         logger.warning(f"Duplicate address detected: {address_id}")
                         return ErrorResponse.build(f"Address {address_id} already exists", 409)
                     logger.error(f"DynamoDB error: {str(e)}")
@@ -408,8 +492,8 @@ def lambda_handler(event, context):
                         Item=item,
                         ConditionExpression="attribute_not_exists(PK) AND attribute_not_exists(SK)"
                     )
-                except Exception as e:
-                    if "ConditionalCheckFailedException" in str(e):
+                except ClientError as e:
+                    if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
                         logger.warning(f"Duplicate customer detected: {item.get('PK')}")
                         return ErrorResponse.build(f"Customer {customer_id} already exists", 409)
                     logger.error(f"DynamoDB error: {str(e)}")
@@ -440,9 +524,22 @@ def lambda_handler(event, context):
                 if "Item" not in check:
                     return ErrorResponse.build("Contact not found", 404)
                 
+                existing_item = check["Item"]
+                
+                # Set PK, SK, and contactId
+                data["PK"] = pk
+                data["SK"] = sk
+                data["contactId"] = contact_id
+                
+                # Preserve createdAt and createdBy
+                if "createdAt" not in data and "createdAt" in existing_item:
+                    data["createdAt"] = existing_item["createdAt"]
+                if "createdBy" not in data and "createdBy" in existing_item:
+                    data["createdBy"] = existing_item["createdBy"]
+                
                 # Set updatedAt and updatedBy
-                data["updatedAt"] = datetime.utcnow().isoformat()
-                if "createdBy" in data:
+                data["updatedAt"] = datetime.utcnow().isoformat() + "Z"
+                if "updatedBy" not in data and "createdBy" in data:
                     data["updatedBy"] = data["createdBy"]
                 
                 try:
@@ -467,9 +564,22 @@ def lambda_handler(event, context):
                 if "Item" not in check:
                     return ErrorResponse.build("Address not found", 404)
                 
+                existing_item = check["Item"]
+                
+                # Set PK, SK, and addressId
+                data["PK"] = pk
+                data["SK"] = sk
+                data["addressId"] = address_id
+                
+                # Preserve createdAt and createdBy
+                if "createdAt" not in data and "createdAt" in existing_item:
+                    data["createdAt"] = existing_item["createdAt"]
+                if "createdBy" not in data and "createdBy" in existing_item:
+                    data["createdBy"] = existing_item["createdBy"]
+                
                 # Set updatedAt and updatedBy
-                data["updatedAt"] = datetime.utcnow().isoformat()
-                if "createdBy" in data:
+                data["updatedAt"] = datetime.utcnow().isoformat() + "Z"
+                if "updatedBy" not in data and "createdBy" in data:
                     data["updatedBy"] = data["createdBy"]
                 
                 try:
@@ -513,8 +623,8 @@ def lambda_handler(event, context):
                     data["createdBy"] = existing_item["createdBy"]
                 
                 # Set updatedAt and updatedBy
-                data["updatedAt"] = datetime.utcnow().isoformat()
-                if "createdBy" in data:
+                data["updatedAt"] = datetime.utcnow().isoformat() + "Z"
+                if "updatedBy" not in data and "createdBy" in data:
                     data["updatedBy"] = data["createdBy"]
                 
                 try:
@@ -528,8 +638,8 @@ def lambda_handler(event, context):
                 return SuccessResponse.build(simplify(prepare_item_for_response(item, "CUSTOMER", decrypt=True)))
         
         elif method == "DELETE":
-            # Check for soft delete parameter
-            soft_delete = query_parameters.get("soft") == "true" if query_parameters else False
+            # Check for soft delete parameter (case-insensitive)
+            soft_delete = query_parameters.get("soft", "").lower() == "true" if query_parameters else False
             
             # DELETE /customers/{id}/contacts/{contactId} - Delete contact
             if "id" in path_parameters and "contactId" in path_parameters:
@@ -547,7 +657,7 @@ def lambda_handler(event, context):
                     # Soft delete - mark as inactive
                     existing_item = check["Item"]
                     existing_item["isActive"] = False
-                    existing_item["updatedAt"] = datetime.utcnow().isoformat()
+                    existing_item["updatedAt"] = datetime.utcnow().isoformat() + "Z"
                     if "updatedBy" in query_parameters:
                         existing_item["updatedBy"] = query_parameters["updatedBy"]
                     table.put_item(Item=existing_item)
@@ -573,7 +683,7 @@ def lambda_handler(event, context):
                     # Soft delete - mark as inactive
                     existing_item = check["Item"]
                     existing_item["isActive"] = False
-                    existing_item["updatedAt"] = datetime.utcnow().isoformat()
+                    existing_item["updatedAt"] = datetime.utcnow().isoformat() + "Z"
                     if "updatedBy" in query_parameters:
                         existing_item["updatedBy"] = query_parameters["updatedBy"]
                     table.put_item(Item=existing_item)
@@ -600,7 +710,7 @@ def lambda_handler(event, context):
                 
                 if soft_delete:
                     # Soft delete - mark all items as inactive
-                    timestamp = datetime.utcnow().isoformat()
+                    timestamp = datetime.utcnow().isoformat() + "Z"
                     updated_by = query_parameters.get("updatedBy") if query_parameters else None
                     
                     for item in items:
