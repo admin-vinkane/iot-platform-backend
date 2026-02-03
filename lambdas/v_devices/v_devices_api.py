@@ -2899,9 +2899,16 @@ def execute_sim_link_transaction(device_id, sim_id, sim_provider, performed_by, 
     """
     timestamp = datetime.utcnow().isoformat() + "Z"
     
-    # Extract SIM details for history
-    sim_mobile = sim_data.get("mobileNumber", "") if sim_data else ""
-    sim_card_number = sim_data.get("simCardNumber", "") if sim_data else ""
+    # Extract SIM details for history - convert encrypted fields to JSON strings if they are dicts
+    def convert_to_string(value):
+        """Convert value to string, handling encrypted dict format"""
+        if isinstance(value, dict):
+            return json.dumps(value)
+        return str(value) if value else ""
+    
+    sim_mobile = convert_to_string(sim_data.get("mobileNumber", "")) if sim_data else ""
+    sim_card_number = convert_to_string(sim_data.get("simCardNumber", "")) if sim_data else ""
+    sim_provider_value = convert_to_string(sim_provider)
     
     try:
         # Prepare transaction items
@@ -2915,7 +2922,7 @@ def execute_sim_link_transaction(device_id, sim_id, sim_provider, performed_by, 
                         "SK": {"S": f"SIM_ASSOC#{sim_id}"},
                         "DeviceId": {"S": device_id},
                         "SIMId": {"S": sim_id},
-                        "Provider": {"S": sim_provider},
+                        "Provider": {"S": sim_provider_value},
                         "Status": {"S": "linked"},
                         "EntityType": {"S": "SIM_ASSOC"},
                         "CreatedDate": {"S": timestamp},
@@ -2976,7 +2983,7 @@ def execute_sim_link_transaction(device_id, sim_id, sim_provider, performed_by, 
                                         "simId": {"S": sim_id},
                                         "mobileNumber": {"S": sim_mobile},
                                         "simCardNumber": {"S": sim_card_number},
-                                        "provider": {"S": sim_provider},
+                                        "provider": {"S": sim_provider_value},
                                         "performedBy": {"S": performed_by},
                                         "ipAddress": {"S": ip_address}
                                     }
@@ -3013,10 +3020,16 @@ def execute_sim_unlink_transaction(device_id, sim_id, performed_by, ip_address, 
     """
     timestamp = datetime.utcnow().isoformat() + "Z"
     
-    # Extract SIM details for history
-    sim_mobile = sim_data.get("mobileNumber", "") if sim_data else ""
-    sim_card_number = sim_data.get("simCardNumber", "") if sim_data else ""
-    sim_provider = sim_data.get("provider", "") if sim_data else ""
+    # Extract SIM details for history - convert encrypted fields to JSON strings if they are dicts
+    def convert_to_string(value):
+        """Convert value to string, handling encrypted dict format"""
+        if isinstance(value, dict):
+            return json.dumps(value)
+        return str(value) if value else ""
+    
+    sim_mobile = convert_to_string(sim_data.get("mobileNumber", "")) if sim_data else ""
+    sim_card_number = convert_to_string(sim_data.get("simCardNumber", "")) if sim_data else ""
+    sim_provider = convert_to_string(sim_data.get("provider", "")) if sim_data else ""
     
     try:
         # Prepare transaction items
