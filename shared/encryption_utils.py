@@ -197,8 +197,12 @@ ENCRYPTION_CONFIG = {
         'decrypt': ['firstName', 'lastName', 'name']
     },
     'INSTALL': {
-        'encrypt': [],
-        'decrypt': []
+        'encrypt': ['chlorineMotorSerialNumber', 'bleachTankSerialNumber'],
+        'decrypt': ['chlorineMotorSerialNumber', 'bleachTankSerialNumber']
+    },
+    'INSTALLATION': {
+        'encrypt': ['chlorineMotorSerialNumber', 'bleachTankSerialNumber'],
+        'decrypt': ['chlorineMotorSerialNumber', 'bleachTankSerialNumber']
     },
     'DEVICE': {
         'encrypt': ['SerialNumber', 'serialNumber'],

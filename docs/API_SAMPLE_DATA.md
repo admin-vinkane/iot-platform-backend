@@ -434,20 +434,88 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices/
 ```
 
 ### DELETE /devices
-**Description:** Delete device metadata (query parameters required)  
+**Description:** Delete device metadata or related records (query parameters required)  
 **⚠️ Note:** Requires Terraform route `DELETE /devices` to be configured  
-**Request:**
+
+**Query Parameters:**
+- `DeviceId` (required): Device identifier
+- `EntityType` (required): Type of record to delete (DEVICE, CONFIG, REPAIR, INSTALL, RUNTIME, SIM_ASSOC)
+- `soft` (optional): Set to "true" for soft delete (marks as deleted instead of removing)
+- `cascade` (optional): Set to "true" to delete device and all related records
+- `performedBy` (optional): User performing the delete operation (used with soft delete)
+
+**Features:**
+- **Validation**: Prevents deletion if device has active SIM or installation links (unless soft or cascade)
+- **Soft Delete**: Marks device as deleted without removing data (preserves history)
+- **Cascade Delete**: Deletes device and all related records (CONFIG, REPAIR, RUNTIME, INSTALL, SIM_ASSOC)
+- **Enhanced Error Handling**: Provides detailed feedback on deletion conflicts
+
+**Request (Standard Delete):**
 ```bash
 curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices?DeviceId=DEV099&EntityType=DEVICE"
 ```
 
-**Response (200):**
+**Response (200 - Success):**
 ```json
 {
   "deleted": {
     "PK": "DEVICE#DEV099",
     "SK": "META",
     "EntityType": "DEVICE"
+  }
+}
+```
+
+**Response (409 - Conflict with linked resources):**
+```json
+{
+  "error": {
+    "message": "Cannot delete device with active associations",
+    "linkedSIMs": 1,
+    "linkedInstallations": 2,
+    "suggestion": "Use ?cascade=true to delete all associations, or ?soft=true to mark as deleted"
+  }
+}
+```
+
+**Request (Soft Delete):**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices?DeviceId=DEV099&EntityType=DEVICE&soft=true&performedBy=admin@vinkane.com"
+```
+
+**Response (200 - Soft Delete Success):**
+```json
+{
+  "deleted": {
+    "PK": "DEVICE#DEV099",
+    "SK": "META",
+    "EntityType": "DEVICE",
+    "softDelete": true,
+    "deletedAt": "2026-02-04T10:30:00Z",
+    "deletedBy": "admin@vinkane.com"
+  }
+}
+```
+
+**Request (Cascade Delete):**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/devices?DeviceId=DEV099&EntityType=DEVICE&cascade=true"
+```
+
+**Response (200 - Cascade Delete Success):**
+```json
+{
+  "deleted": {
+    "DeviceId": "DEV099",
+    "cascadeDelete": true,
+    "totalRecordsDeleted": 8,
+    "deletedItems": [
+      {"PK": "DEVICE#DEV099", "SK": "META", "EntityType": "DEVICE"},
+      {"PK": "DEVICE#DEV099", "SK": "CONFIG#V1.0#2026-01-15T10:30:00Z", "EntityType": "CONFIG"},
+      {"PK": "DEVICE#DEV099", "SK": "REPAIR#REP001#2026-01-20T08:00:00Z", "EntityType": "REPAIR"},
+      {"PK": "DEVICE#DEV099", "SK": "INSTALL#INS001#2026-01-10T12:00:00Z", "EntityType": "INSTALL"},
+      {"PK": "DEVICE#DEV099", "SK": "SIM_ASSOC#SIM12345", "EntityType": "SIM_ASSOC"}
+    ]
   }
 }
 ```
@@ -1308,8 +1376,94 @@ curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/install
 }
 ```
 
+### GET /installs/{installId}/contacts
+**Description:** Get all contacts linked to a specific installation  
+**⚠️ Note:** Requires Terraform route `GET /installs/{installId}/contacts` to be configured  
+**Features:**
+- Batch fetches contact details from customer table
+- Returns full contact information with association metadata
+- Validates installation exists and has CustomerId
+
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/ebc4c2b3-f9cb-471e-9d69-bd93061ce64c/contacts"
+```
+
+**Response (200):**
+```json
+{
+  "installId": "ebc4c2b3-f9cb-471e-9d69-bd93061ce64c",
+  "contactCount": 2,
+  "contacts": [
+    {
+      "contactId": "CONT092F151B",
+      "customerId": "CUSTB8F7213D",
+      "firstName": "Ramesh",
+      "lastName": "Kumar",
+      "displayName": "Ramesh Kumar",
+      "email": {
+        "encrypted_value": "cmFtZXNoa3VtYXJAdmlua2FuZS5jb20=",
+        "key_version": "1",
+        "encrypted_at": "2026-02-03T07:59:25.164613Z"
+      },
+      "mobileNumber": "890945409",
+      "countryCode": "+91",
+      "contactType": "primary",
+      "isActive": true,
+      "linkedDate": "2026-02-03T09:43:07.412648Z",
+      "linkedBy": "system",
+      "linkStatus": "active",
+      "createdAt": "2026-02-03T07:59:25.164443Z",
+      "updatedAt": "2026-02-03T07:59:25.164443Z",
+      "createdBy": "Current User",
+      "updatedBy": "Current User"
+    },
+    {
+      "contactId": "C123",
+      "customerId": "CUSTB8F7213D",
+      "firstName": "Nag",
+      "lastName": "Indra",
+      "displayName": "Nag Indra",
+      "email": {
+        "encrypted_value": "bmFnZW5kcmFAZXhhbXBsZS5jb20=",
+        "key_version": "1",
+        "encrypted_at": "2026-02-03T07:59:25.087414Z"
+      },
+      "mobileNumber": "03453434433",
+      "countryCode": "+91",
+      "contactType": "primary",
+      "isActive": true,
+      "userId": "USER001",
+      "linkedDate": "2026-02-03T16:47:38.888160Z",
+      "linkedBy": "test@example.com",
+      "linkStatus": "active",
+      "createdAt": "2026-01-19T15:08:49.268Z",
+      "updatedAt": "2026-02-03T07:59:25.087193Z",
+      "createdBy": "Current User",
+      "updatedBy": "admin@vinkane.com"
+    }
+  ]
+}
+```
+
+**Response (404) - Install not found:**
+```json
+{
+  "error": "Install ebc4c2b3-f9cb-471e-9d69-bd93061ce64c not found"
+}
+```
+
+**Response (400) - Installation without CustomerId:**
+```json
+{
+  "error": "Installation does not have a CustomerId. Cannot retrieve contacts."
+}
+```
+
+---
+
 ### GET /installs/{installId}?includeContacts=true
-**Description:** Retrieve installation details with linked contacts  
+**Description:** Retrieve installation details with linked contacts included inline  
 **Query Parameters:**
 - `includeContacts=true` - Include linked contact details (default: false)
 - `includeDevices=true` - Include linked device details (default: false)
@@ -3085,11 +3239,19 @@ curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/surve
 ## 3. INSTALLS API
 
 ### GET /installs
-**Description:** Fetch all device installations  
+**Description:** Fetch all device installations with pagination support  
 **Query Parameters (Optional):**
-- `includeDevices` - Set to `true` to include linked devices in response (default: `false`)
+- `includeDevices` - Set to `true` to include full device details in response (default: `false`)
+- `includeCustomer` - Set to `true` to include customer details in response (default: `true`)
+- `limit` - Number of items per page, 1-100 (default: `50`)
+- `nextToken` - Pagination token from previous response for fetching next page
 
-**Request (without devices):**
+**Response Fields:**
+- `contactsCount` - Number of contacts linked to each installation (always included)
+- `linkedDevices` - Array of device details (only when `includeDevices=true`)
+- `customer` - Customer details object (only when `includeCustomer=true`)
+
+**Request (basic - without devices):**
 ```bash
 curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs"
 ```
@@ -3099,25 +3261,40 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/install
 {
   "installCount": 2,
   "includeDevices": false,
+  "includeCustomer": true,
+  "limit": 50,
   "installs": [
     {
       "PK": "INSTALL#INST-HAB-001",
       "SK": "META",
       "InstallationId": "INST-HAB-001",
+      "CustomerId": "CUSTB8F7213D",
       "Status": "inactive",
       "PrimaryDevice": "chlorine",
-      "LocationHierarchy": {
-        "StateId": "TS",
-        "DistrictId": "RR",
-        "MandalId": "RR01",
-        "VillageId": "RR01001",
-        "HabitationId": "HAB-001"
-      },
+      "StateId": "TS",
+      "DistrictId": "RR",
+      "MandalId": "RR01",
+      "VillageId": "RR01001",
+      "HabitationId": "HAB-001",
+      "stateName": "Telangana",
+      "districtName": "Ranga Reddy",
+      "mandalName": "Mandal 01",
+      "villageName": "Village 001",
+      "habitationName": "Habitation 001",
       "InstallationDate": "2026-01-20T10:00:00Z",
       "CreatedDate": "2026-01-20T10:00:00Z",
       "UpdatedDate": "2026-01-29T08:07:51.136123Z",
       "CreatedBy": "admin",
       "UpdatedBy": "admin",
+      "contactsCount": 2,
+      "customer": {
+        "customerId": "CUSTB8F7213D",
+        "name": "ABC Corporation",
+        "companyName": "ABC Corp",
+        "email": "contact@abccorp.com",
+        "phone": "9876543210",
+        "countryCode": "+91"
+      },
       "changeHistory": [
         {
           "timestamp": "2026-01-29T08:07:51.136123Z",
@@ -3140,29 +3317,43 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/install
       "PK": "INSTALL#INST-HAB-003",
       "SK": "META",
       "InstallationId": "INST-HAB-003",
+      "CustomerId": null,
       "Status": "active",
       "PrimaryDevice": "chlorine",
-      "LocationHierarchy": {
-        "StateId": "TS",
-        "DistrictId": "RR",
-        "MandalId": "RR01",
-        "VillageId": "RR01002",
-        "HabitationId": "HAB-003"
-      },
+      "StateId": "TS",
+      "DistrictId": "RR",
+      "MandalId": "RR01",
+      "VillageId": "RR01002",
+      "HabitationId": "HAB-003",
+      "stateName": "Telangana",
+      "districtName": "Ranga Reddy",
+      "mandalName": "Mandal 01",
+      "villageName": "Village 002",
+      "habitationName": "Habitation 003",
       "InstallationDate": "2026-01-25T09:00:00Z",
       "CreatedDate": "2026-01-25T09:00:00Z",
       "UpdatedDate": "2026-01-25T09:00:00Z",
       "CreatedBy": "technician",
       "UpdatedBy": "technician",
+      "contactsCount": 0,
       "changeHistory": null
     }
   ]
 }
 ```
 
+**Request (with pagination):**
+```bash
+# First page
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs?limit=10"
+
+# Next page using returned token
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs?limit=10&nextToken=eyJQSyI6IklOU1RBTEwjSU5TVC0wMDEiLCJTSyI6Ik1FVEEifQ=="
+```
+
 **Request (with devices - comprehensive view):**
 ```bash
-curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs?includeDevices=true"
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs?includeDevices=true&includeCustomer=true"
 ```
 
 **Response (200):**
@@ -3233,6 +3424,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/install
       "UpdatedDate": "2026-01-25T09:00:00Z",
       "CreatedBy": "technician",
       "UpdatedBy": "technician",
+      "contactsCount": 0,
       "linkedDeviceCount": 2,
       "linkedDevices": [
         {
@@ -3526,6 +3718,133 @@ curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/instal
 - Uses fallback habitation IDs when API creation fails
 - Non-blocking - installation succeeds even if Thingsboard sync fails
 
+### GET /installs/{installId}
+**Description:** Get a single installation by ID with optional related data  
+**Query Parameters (Optional):**
+- `includeDevices=true` - Include full device details (default: `false`)
+- `includeCustomer=true` - Include customer details (default: `true`)
+- `includeContacts=true` - Include linked contact details (default: `false`)
+
+**Request (basic):**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/ebc4c2b3-f9cb-471e-9d69-bd93061ce64c"
+```
+
+**Request (with all related data):**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/ebc4c2b3-f9cb-471e-9d69-bd93061ce64c?includeDevices=true&includeCustomer=true&includeContacts=true"
+```
+
+**Response (200) - Basic:**
+```json
+{
+  "PK": "INSTALL#ebc4c2b3-f9cb-471e-9d69-bd93061ce64c",
+  "SK": "META",
+  "InstallationId": "ebc4c2b3-f9cb-471e-9d69-bd93061ce64c",
+  "CustomerId": "CUSTB8F7213D",
+  "StateId": "TS",
+  "DistrictId": "HYD",
+  "MandalId": "SRNAGAR",
+  "VillageId": "VILLAGE001",
+  "HabitationId": "005",
+  "stateName": "Telangana",
+  "districtName": "Hyderabad",
+  "mandalName": "Srikakulam Nagar",
+  "villageName": "Village 001",
+  "habitationName": "Habitation 005",
+  "PrimaryDevice": "water",
+  "Status": "active",
+  "InstallationDate": "2026-01-31T00:00:00.000Z",
+  "CreatedDate": "2026-01-31T10:30:00.000Z",
+  "UpdatedDate": "2026-01-31T10:30:00.000Z",
+  "CreatedBy": "admin@example.com",
+  "UpdatedBy": "admin@example.com",
+  "customer": {
+    "customerId": "CUSTB8F7213D",
+    "name": "ABC Corporation",
+    "companyName": "ABC Corp",
+    "email": "contact@abccorp.com",
+    "phone": "9876543210",
+    "countryCode": "+91"
+  }
+}
+```
+
+**Response (200) - With includeDevices=true:**
+```json
+{
+  "PK": "INSTALL#ebc4c2b3-f9cb-471e-9d69-bd93061ce64c",
+  "SK": "META",
+  "InstallationId": "ebc4c2b3-f9cb-471e-9d69-bd93061ce64c",
+  "CustomerId": "CUSTB8F7213D",
+  "StateId": "TS",
+  "stateName": "Telangana",
+  "PrimaryDevice": "water",
+  "Status": "active",
+  "linkedDeviceCount": 2,
+  "linkedDevices": [
+    {
+      "DeviceId": "DEV001",
+      "DeviceName": "Water Motor Unit",
+      "DeviceType": "IoT Sensor",
+      "Status": "active",
+      "SerialNumber": "SN123456789",
+      "linkedDate": "2026-01-31T11:00:00.000Z",
+      "linkedBy": "admin@example.com",
+      "linkStatus": "active"
+    },
+    {
+      "DeviceId": "DEV002",
+      "DeviceName": "Chlorine Sensor",
+      "DeviceType": "IoT Sensor",
+      "Status": "active",
+      "SerialNumber": "SN987654321",
+      "linkedDate": "2026-01-31T11:05:00.000Z",
+      "linkedBy": "admin@example.com",
+      "linkStatus": "active"
+    }
+  ]
+}
+```
+
+**Response (200) - With includeContacts=true:**
+```json
+{
+  "InstallationId": "ebc4c2b3-f9cb-471e-9d69-bd93061ce64c",
+  "CustomerId": "CUSTB8F7213D",
+  "linkedContactCount": 2,
+  "linkedContacts": [
+    {
+      "contactId": "CONT092F151B",
+      "customerId": "CUSTB8F7213D",
+      "firstName": "Ramesh",
+      "lastName": "Kumar",
+      "displayName": "Ramesh Kumar",
+      "email": {
+        "encrypted_value": "cmFtZXNoa3VtYXJAdmlua2FuZS5jb20=",
+        "key_version": "1",
+        "encrypted_at": "2026-02-03T07:59:25.164613Z"
+      },
+      "mobileNumber": "890945409",
+      "countryCode": "+91",
+      "contactType": "primary",
+      "linkedDate": "2026-02-03T09:43:07.412648Z",
+      "linkedBy": "system",
+      "linkStatus": "active"
+    }
+  ]
+}
+```
+
+**Response (404) - Install not found:**
+```json
+{
+  "error": "Install ebc4c2b3-f9cb-471e-9d69-bd93061ce64c not found"
+}
+```
+
+---
+
 ### PUT /installs/{installId}
 **Description:** Update installation details  
 **Request:**
@@ -3607,6 +3926,121 @@ curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/install
 - Automatically tracks change history with old/new values
 - Records IP address, timestamp, and user for each change
 - Returns both the updated installation and a summary of changes
+
+---
+
+### DELETE /installs/{installId}
+**Description:** Delete an installation with optional soft delete or cascade delete  
+**Query Parameters:**
+- `soft` (optional): Set to "true" for soft delete (marks as deleted without removing data)
+- `cascade` (optional): Set to "true" to delete installation and all associations (devices, contacts)
+- `performedBy` (optional): Email/username of person performing deletion (default: "system")
+
+**Request - Standard Delete (requires no linked resources):**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INST-HAB-001?performedBy=admin@example.com"
+```
+
+**Response (200) - Success:**
+```json
+{
+  "deleted": {
+    "PK": "INSTALL#INST-HAB-001",
+    "SK": "META",
+    "InstallationId": "INST-HAB-001"
+  }
+}
+```
+
+**Response (409) - Validation Error (has linked resources):**
+```json
+{
+  "error": {
+    "message": "Cannot delete installation with active associations",
+    "linkedDevices": 2,
+    "linkedContacts": 1,
+    "suggestion": "Use ?cascade=true to delete all associations, or ?soft=true to mark as deleted"
+  }
+}
+```
+
+**Request - Soft Delete:**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INST-HAB-001?soft=true&performedBy=admin@example.com"
+```
+
+**Response (200):**
+```json
+{
+  "deleted": {
+    "PK": "INSTALL#INST-HAB-001",
+    "SK": "META",
+    "InstallationId": "INST-HAB-001",
+    "softDelete": true,
+    "deletedAt": "2026-02-04T10:30:00.000000Z",
+    "deletedBy": "admin@example.com"
+  }
+}
+```
+
+**Request - Cascade Delete (removes all associations):**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INST-HAB-001?cascade=true&performedBy=admin@example.com"
+```
+
+**Response (200):**
+```json
+{
+  "deleted": {
+    "InstallationId": "INST-HAB-001",
+    "cascadeDelete": true,
+    "totalRecordsDeleted": 5,
+    "deletedItems": [
+      {
+        "PK": "DEVICE#DEV001",
+        "SK": "INSTALL#INST-HAB-001",
+        "Type": "bidirectional_device_assoc"
+      },
+      {
+        "PK": "CUSTOMER#CUST001",
+        "SK": "ENTITY#INSTALL_ASSOC#INST-HAB-001",
+        "Type": "bidirectional_contact_assoc",
+        "Table": "v_customers_dev"
+      },
+      {
+        "PK": "INSTALL#INST-HAB-001",
+        "SK": "META",
+        "Type": "installation_record"
+      },
+      {
+        "PK": "INSTALL#INST-HAB-001",
+        "SK": "DEVICE_ASSOC#DEV001",
+        "Type": "installation_record"
+      },
+      {
+        "PK": "INSTALL#INST-HAB-001",
+        "SK": "CONTACT_ASSOC#CONT001",
+        "Type": "installation_record"
+      }
+    ]
+  }
+}
+```
+
+**Features:**
+- **Validation**: Standard delete blocked if installation has linked devices or contacts
+- **Soft Delete**: Marks installation as deleted (adds `IsDeleted=true`, `DeletedAt`, `DeletedBy`) without removing data
+- **Cascade Delete**: Removes installation and all associations:
+  - Device associations (bidirectional: `INSTALL#` → `DEVICE#` and `DEVICE#` → `INSTALL#`)
+  - Contact associations (bidirectional: `INSTALL#` → `CUSTOMER#` contact links)
+  - Removes `LinkedInstallationId` from device META records
+  - Installation META and all association records
+- **Audit Trail**: Tracks who performed deletion and when
+
+**Error Responses:**
+- `404`: Installation not found
+- `409`: Cannot delete installation with linked resources (use cascade or soft delete)
+- `500`: Database or unexpected error
 
 ---
 

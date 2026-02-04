@@ -8,8 +8,7 @@
 set -e
 
 # Set VERSION to current timestamp (YYYYmmddHHMMSS)
-# VERSION=$(date +%Y%m%d%H%M%S)
-VERSION="20250816204228"
+VERSION=$(date +%Y%m%d%H%M%S)
 
 
 # If not running inside Docker, re-invoke this script inside the official AWS Lambda Python 3.12 Docker image for Linux compatibility,
