@@ -1,0 +1,769 @@
+{
+  "version": "2.0",
+  "lastUpdated": "2026-02-08T00:00:00Z",
+  "schemaVersion": "2.0",
+  "metadata": {
+    "description": "RBAC configuration for IoT Platform",
+    "totalRoles": 10,
+    "totalPermissions": 84,
+    "totalComponents": 21
+  },
+  "roleMapping": {
+    "admin": "Administrator",
+    "manager": "Installation Manager",
+    "operator": "Operator",
+    "viewer": "Viewer",
+    "field_technician": "Device Manager",
+    "device_manager": "Device Manager",
+    "installation_manager": "Installation Manager",
+    "inventory_manager": "Inventory Manager",
+    "sim_manager": "SIM Manager",
+    "data_manager": "Data Manager",
+    "customer": "Customer",
+    "customer_super_user": "Customer Super User"
+  },
+  "resources": [
+    "dashboard",
+    "device",
+    "installation",
+    "inventory",
+    "simcard",
+    "masterdata",
+    "user",
+    "permission",
+    "navigation",
+    "customer",
+    "alert",
+    "audit",
+    "system"
+  ],
+  "actions": [
+    "create",
+    "read",
+    "update",
+    "delete",
+    "manage",
+    "link",
+    "unlink",
+    "export",
+    "control",
+    "audit",
+    "assign",
+    "register",
+    "acknowledge",
+    "resolve",
+    "override",
+    "bulk"
+  ],
+  "permissions": {
+    "dashboard:read": {
+      "displayName": "View Dashboard",
+      "description": "View main dashboard and statistics",
+      "resource": "dashboard",
+      "action": "read",
+      "category": "Dashboard"
+    },
+    "dashboard:export": {
+      "displayName": "Export Dashboard Data",
+      "description": "Export dashboard statistics and data",
+      "resource": "dashboard",
+      "action": "export",
+      "category": "Dashboard"
+    },
+    "device:read": {
+      "displayName": "View Devices",
+      "description": "View device configurations and details",
+      "resource": "device",
+      "action": "read",
+      "category": "Device Management"
+    },
+    "device:create": {
+      "displayName": "Add Devices",
+      "description": "Create new device configurations",
+      "resource": "device",
+      "action": "create",
+      "category": "Device Management"
+    },
+    "device:update": {
+      "displayName": "Edit Devices",
+      "description": "Update existing device configurations",
+      "resource": "device",
+      "action": "update",
+      "category": "Device Management"
+    },
+    "device:delete": {
+      "displayName": "Delete Devices",
+      "description": "Remove device configurations",
+      "resource": "device",
+      "action": "delete",
+      "category": "Device Management"
+    },
+    "device:register": {
+      "displayName": "Register Devices",
+      "description": "Register new devices in the system",
+      "resource": "device",
+      "action": "register",
+      "category": "Device Management"
+    },
+    "device:control": {
+      "displayName": "Control Devices",
+      "description": "Control device operations (start/stop motors)",
+      "resource": "device",
+      "action": "control",
+      "category": "Device Management"
+    },
+    "device:audit": {
+      "displayName": "View Device Audit",
+      "description": "View device audit trails and history",
+      "resource": "device",
+      "action": "audit",
+      "category": "Device Management"
+    },
+    "installation:read": {
+      "displayName": "View Installations",
+      "description": "View installation details and configurations",
+      "resource": "installation",
+      "action": "read",
+      "category": "Installation Management"
+    },
+    "installation:create": {
+      "displayName": "Add Installations",
+      "description": "Create new installations",
+      "resource": "installation",
+      "action": "create",
+      "category": "Installation Management"
+    },
+    "installation:update": {
+      "displayName": "Edit Installations",
+      "description": "Update existing installations",
+      "resource": "installation",
+      "action": "update",
+      "category": "Installation Management"
+    },
+    "installation:delete": {
+      "displayName": "Delete Installations",
+      "description": "Remove installations from the system",
+      "resource": "installation",
+      "action": "delete",
+      "category": "Installation Management"
+    },
+    "installation:link_device": {
+      "displayName": "Link Devices to Installations",
+      "description": "Link devices to installation locations",
+      "resource": "installation",
+      "action": "link",
+      "category": "Installation Management"
+    },
+    "installation:unlink_device": {
+      "displayName": "Unlink Devices from Installations",
+      "description": "Unlink devices from installation locations",
+      "resource": "installation",
+      "action": "unlink",
+      "category": "Installation Management"
+    },
+    "installation:manage_contacts": {
+      "displayName": "Manage Installation Contacts",
+      "description": "Add, edit, delete installation contacts",
+      "resource": "installation",
+      "action": "manage",
+      "category": "Installation Management"
+    },
+    "installation:capture_location": {
+      "displayName": "Capture Location",
+      "description": "Capture and update installation GPS coordinates",
+      "resource": "installation",
+      "action": "update",
+      "category": "Installation Management"
+    },
+    "installation:audit": {
+      "displayName": "View Installation Audit",
+      "description": "View installation audit trails",
+      "resource": "installation",
+      "action": "audit",
+      "category": "Installation Management"
+    },
+    "inventory:read": {
+      "displayName": "View Inventory",
+      "description": "View device inventory and stock",
+      "resource": "inventory",
+      "action": "read",
+      "category": "Inventory Management"
+    },
+    "inventory:create": {
+      "displayName": "Add Inventory Devices",
+      "description": "Add devices to inventory",
+      "resource": "inventory",
+      "action": "create",
+      "category": "Inventory Management"
+    },
+    "inventory:update": {
+      "displayName": "Edit Inventory Devices",
+      "description": "Update inventory device information",
+      "resource": "inventory",
+      "action": "update",
+      "category": "Inventory Management"
+    },
+    "inventory:delete": {
+      "displayName": "Delete Inventory Devices",
+      "description": "Remove devices from inventory",
+      "resource": "inventory",
+      "action": "delete",
+      "category": "Inventory Management"
+    },
+    "inventory:manage_repairs": {
+      "displayName": "Manage Repairs",
+      "description": "Add and edit device repair records",
+      "resource": "inventory",
+      "action": "manage",
+      "category": "Inventory Management"
+    },
+    "inventory:view_repair_history": {
+      "displayName": "View Repair History",
+      "description": "View complete repair history for devices",
+      "resource": "inventory",
+      "action": "read",
+      "category": "Inventory Management"
+    },
+    "simcard:read": {
+      "displayName": "View SIM Cards",
+      "description": "View SIM card details and status",
+      "resource": "simcard",
+      "action": "read",
+      "category": "SIM Management"
+    },
+    "simcard:create": {
+      "displayName": "Add SIM Cards",
+      "description": "Add new SIM cards to the system",
+      "resource": "simcard",
+      "action": "create",
+      "category": "SIM Management"
+    },
+    "simcard:update": {
+      "displayName": "Edit SIM Cards",
+      "description": "Update SIM card information",
+      "resource": "simcard",
+      "action": "update",
+      "category": "SIM Management"
+    },
+    "simcard:delete": {
+      "displayName": "Delete SIM Cards",
+      "description": "Remove SIM cards from the system",
+      "resource": "simcard",
+      "action": "delete",
+      "category": "SIM Management"
+    },
+    "simcard:link_device": {
+      "displayName": "Link SIM to Device",
+      "description": "Link SIM cards to devices",
+      "resource": "simcard",
+      "action": "link",
+      "category": "SIM Management"
+    },
+    "simcard:unlink_device": {
+      "displayName": "Unlink SIM from Device",
+      "description": "Unlink SIM cards from devices",
+      "resource": "simcard",
+      "action": "unlink",
+      "category": "SIM Management"
+    },
+    "simcard:audit": {
+      "displayName": "View SIM Audit",
+      "description": "View SIM card audit trails",
+      "resource": "simcard",
+      "action": "audit",
+      "category": "SIM Management"
+    },
+    "masterdata:read": {
+      "displayName": "View Master Data",
+      "description": "View master data entities",
+      "resource": "masterdata",
+      "action": "read",
+      "category": "Master Data"
+    },
+    "masterdata:create": {
+      "displayName": "Add Master Data",
+      "description": "Create new master data entries",
+      "resource": "masterdata",
+      "action": "create",
+      "category": "Master Data"
+    },
+    "masterdata:update": {
+      "displayName": "Edit Master Data",
+      "description": "Update master data entries",
+      "resource": "masterdata",
+      "action": "update",
+      "category": "Master Data"
+    },
+    "masterdata:delete": {
+      "displayName": "Delete Master Data",
+      "description": "Remove master data entries",
+      "resource": "masterdata",
+      "action": "delete",
+      "category": "Master Data"
+    },
+    "masterdata:audit": {
+      "displayName": "View Master Data Audit",
+      "description": "View master data audit trails",
+      "resource": "masterdata",
+      "action": "audit",
+      "category": "Master Data"
+    },
+    "user:read": {
+      "displayName": "View Users",
+      "description": "View user accounts and profiles",
+      "resource": "user",
+      "action": "read",
+      "category": "User Management"
+    },
+    "user:create": {
+      "displayName": "Create Users",
+      "description": "Create new user accounts",
+      "resource": "user",
+      "action": "create",
+      "category": "User Management"
+    },
+    "user:update": {
+      "displayName": "Update Users",
+      "description": "Update user account information",
+      "resource": "user",
+      "action": "update",
+      "category": "User Management"
+    },
+    "user:delete": {
+      "displayName": "Delete Users",
+      "description": "Remove user accounts",
+      "resource": "user",
+      "action": "delete",
+      "category": "User Management"
+    },
+    "user:manage": {
+      "displayName": "Manage Users",
+      "description": "Full user management capabilities",
+      "resource": "user",
+      "action": "manage",
+      "category": "User Management"
+    },
+    "permission:read": {
+      "displayName": "View Permissions",
+      "description": "View permissions and role assignments",
+      "resource": "permission",
+      "action": "read",
+      "category": "System Administration"
+    },
+    "permission:manage": {
+      "displayName": "Manage Permissions",
+      "description": "Manage permission assignments",
+      "resource": "permission",
+      "action": "manage",
+      "category": "System Administration"
+    },
+    "permission:assign_role": {
+      "displayName": "Assign Roles",
+      "description": "Assign roles to users",
+      "resource": "permission",
+      "action": "assign",
+      "category": "System Administration"
+    },
+    "permission:create_role": {
+      "displayName": "Create Roles",
+      "description": "Create new roles",
+      "resource": "permission",
+      "action": "create",
+      "category": "System Administration"
+    },
+    "permission:update_role": {
+      "displayName": "Edit Roles",
+      "description": "Modify existing roles",
+      "resource": "permission",
+      "action": "update",
+      "category": "System Administration"
+    },
+    "permission:delete_role": {
+      "displayName": "Delete Roles",
+      "description": "Remove roles from the system",
+      "resource": "permission",
+      "action": "delete",
+      "category": "System Administration"
+    },
+    "navigation:read": {
+      "displayName": "View Navigation",
+      "description": "View navigation menu configuration",
+      "resource": "navigation",
+      "action": "read",
+      "category": "System Administration"
+    },
+    "navigation:manage": {
+      "displayName": "Manage Navigation",
+      "description": "Manage navigation menu items and order",
+      "resource": "navigation",
+      "action": "manage",
+      "category": "System Administration"
+    },
+    "navigation:audit": {
+      "displayName": "View Navigation Audit",
+      "description": "View navigation change audit trails",
+      "resource": "navigation",
+      "action": "audit",
+      "category": "System Administration"
+    },
+    "audit:read": {
+      "displayName": "View Audit Trails",
+      "description": "View system-wide audit trails",
+      "resource": "audit",
+      "action": "read",
+      "category": "System Administration"
+    },
+    "audit:export": {
+      "displayName": "Export Audit Data",
+      "description": "Export audit trail data",
+      "resource": "audit",
+      "action": "export",
+      "category": "System Administration"
+    },
+    "system:manage_settings": {
+      "displayName": "Manage System Settings",
+      "description": "Manage system configuration and settings",
+      "resource": "system",
+      "action": "manage",
+      "category": "System Administration"
+    },
+    "customer:read_dashboard": {
+      "displayName": "View Customer Dashboard",
+      "description": "View customer-specific dashboard",
+      "resource": "customer",
+      "action": "read",
+      "category": "Customer Portal"
+    },
+    "customer:control_devices": {
+      "displayName": "Control Customer Devices",
+      "description": "Control devices in customer installations",
+      "resource": "customer",
+      "action": "control",
+      "category": "Customer Portal"
+    },
+    "customer:view_runtime": {
+      "displayName": "View Runtime Data",
+      "description": "View device runtime and usage data",
+      "resource": "customer",
+      "action": "read",
+      "category": "Customer Portal"
+    },
+    "customer:export_data": {
+      "displayName": "Export Customer Data",
+      "description": "Export customer device and runtime data",
+      "resource": "customer",
+      "action": "export",
+      "category": "Customer Portal"
+    },
+    "alert:read": {
+      "displayName": "View Alerts",
+      "description": "View system and device alerts",
+      "resource": "alert",
+      "action": "read",
+      "category": "Alerts"
+    },
+    "alert:acknowledge": {
+      "displayName": "Acknowledge Alerts",
+      "description": "Acknowledge received alerts",
+      "resource": "alert",
+      "action": "acknowledge",
+      "category": "Alerts"
+    },
+    "alert:resolve": {
+      "displayName": "Resolve Alerts",
+      "description": "Mark alerts as resolved",
+      "resource": "alert",
+      "action": "resolve",
+      "category": "Alerts"
+    },
+    "alert:manage": {
+      "displayName": "Manage Organization Alerts",
+      "description": "Manage alert configurations for organizations",
+      "resource": "alert",
+      "action": "manage",
+      "category": "Alerts"
+    },
+    "admin:view_customer_monitor": {
+      "displayName": "View Admin Customer Monitor",
+      "description": "View admin-level customer monitoring dashboard",
+      "resource": "admin",
+      "action": "read",
+      "category": "Admin Controls"
+    },
+    "admin:view_all_organizations": {
+      "displayName": "View All Organizations",
+      "description": "View data across all organizations",
+      "resource": "admin",
+      "action": "read",
+      "category": "Admin Controls"
+    },
+    "admin:cross_organization_devices": {
+      "displayName": "View Cross-Organization Devices",
+      "description": "View devices across different organizations",
+      "resource": "admin",
+      "action": "read",
+      "category": "Admin Controls"
+    },
+    "admin:override_control": {
+      "displayName": "Admin Override Control",
+      "description": "Override device controls with admin privileges",
+      "resource": "admin",
+      "action": "override",
+      "category": "Admin Controls"
+    },
+    "admin:bulk_device_control": {
+      "displayName": "Bulk Device Control",
+      "description": "Control multiple devices simultaneously",
+      "resource": "admin",
+      "action": "bulk",
+      "category": "Admin Controls"
+    },
+    "admin:view_control_audit": {
+      "displayName": "View Control Audit",
+      "description": "View device control audit trails",
+      "resource": "admin",
+      "action": "audit",
+      "category": "Admin Controls"
+    },
+    "admin:view_activity_logs": {
+      "displayName": "View Activity Logs",
+      "description": "View system-wide activity logs",
+      "resource": "admin",
+      "action": "read",
+      "category": "Admin Controls"
+    },
+    "admin:view_device_analytics": {
+      "displayName": "View Device Analytics",
+      "description": "View advanced device analytics and reports",
+      "resource": "admin",
+      "action": "read",
+      "category": "Admin Controls"
+    }
+  },
+  "roles": {
+    "admin": {
+      "displayName": "Administrator",
+      "description": "Full system access with all permissions",
+      "level": 100,
+      "isSystem": true,
+      "permissions": ["*"]
+    },
+    "device_manager": {
+      "displayName": "Device Manager",
+      "description": "Manages devices and installations",
+      "level": 60,
+      "isSystem": false,
+      "permissions": [
+        "dashboard:read",
+        "device:read",
+        "device:create",
+        "device:update",
+        "device:register",
+        "device:control",
+        "device:audit",
+        "installation:read",
+        "installation:update",
+        "installation:link_device",
+        "installation:unlink_device",
+        "installation:capture_location",
+        "installation:audit"
+      ]
+    },
+    "installation_manager": {
+      "displayName": "Installation Manager",
+      "description": "Manages installations and contacts",
+      "level": 50,
+      "isSystem": false,
+      "permissions": [
+        "dashboard:read",
+        "installation:read",
+        "installation:create",
+        "installation:update",
+        "installation:manage_contacts",
+        "installation:capture_location",
+        "installation:audit"
+      ]
+    },
+    "inventory_manager": {
+      "displayName": "Inventory Manager",
+      "description": "Manages device inventory and repairs",
+      "level": 50,
+      "isSystem": false,
+      "permissions": [
+        "dashboard:read",
+        "inventory:read",
+        "inventory:create",
+        "inventory:update",
+        "inventory:manage_repairs",
+        "inventory:view_repair_history"
+      ]
+    },
+    "sim_manager": {
+      "displayName": "SIM Manager",
+      "description": "Manages SIM cards and device linking",
+      "level": 50,
+      "isSystem": false,
+      "permissions": [
+        "dashboard:read",
+        "simcard:read",
+        "simcard:create",
+        "simcard:update",
+        "simcard:link_device",
+        "simcard:unlink_device",
+        "simcard:audit"
+      ]
+    },
+    "data_manager": {
+      "displayName": "Data Manager",
+      "description": "Manages master data and configurations",
+      "level": 50,
+      "isSystem": false,
+      "permissions": [
+        "dashboard:read",
+        "masterdata:read",
+        "masterdata:create",
+        "masterdata:update",
+        "masterdata:audit"
+      ]
+    },
+    "operator": {
+      "displayName": "Operator",
+      "description": "Operates devices and views system information",
+      "level": 30,
+      "isSystem": false,
+      "permissions": [
+        "dashboard:read",
+        "device:read",
+        "device:control",
+        "installation:read",
+        "inventory:read",
+        "simcard:read"
+      ]
+    },
+    "viewer": {
+      "displayName": "Viewer",
+      "description": "View-only access to system data",
+      "level": 10,
+      "isSystem": false,
+      "permissions": [
+        "dashboard:read",
+        "device:read",
+        "installation:read",
+        "inventory:read",
+        "simcard:read",
+        "masterdata:read"
+      ]
+    },
+    "customer": {
+      "displayName": "Customer",
+      "description": "Customer portal access with limited controls",
+      "level": 20,
+      "isSystem": false,
+      "permissions": [
+        "customer:read_dashboard",
+        "customer:control_devices",
+        "customer:view_runtime",
+        "customer:export_data",
+        "alert:read",
+        "alert:acknowledge"
+      ]
+    },
+    "customer_super_user": {
+      "displayName": "Customer Super User",
+      "description": "Enhanced customer access with alert resolution",
+      "level": 25,
+      "isSystem": false,
+      "permissions": [
+        "customer:read_dashboard",
+        "customer:control_devices",
+        "customer:view_runtime",
+        "customer:export_data",
+        "alert:read",
+        "alert:acknowledge",
+        "alert:resolve"
+      ]
+    }
+  },
+  "components": {
+    "DashboardPage": {
+      "path": "/dashboard",
+      "icon": "dashboard",
+      "order": 1,
+      "category": "Dashboard",
+      "requiredPermissions": ["dashboard:read"],
+      "optionalPermissions": ["device:control"]
+    },
+    "DeviceConfigurationPage": {
+      "path": "/devices",
+      "icon": "devices",
+      "order": 2,
+      "category": "Device Management",
+      "requiredPermissions": ["device:read"],
+      "optionalPermissions": ["device:create", "device:update", "device:delete", "device:audit"]
+    },
+    "InstallationManagementPage": {
+      "path": "/installations",
+      "icon": "location",
+      "order": 3,
+      "category": "Installation Management",
+      "requiredPermissions": ["installation:read"],
+      "optionalPermissions": ["installation:create", "installation:update", "installation:delete", "installation:link_device"]
+    },
+    "DeviceInventoryPage": {
+      "path": "/inventory",
+      "icon": "inventory",
+      "order": 4,
+      "category": "Inventory Management",
+      "requiredPermissions": ["inventory:read"],
+      "optionalPermissions": ["inventory:create", "inventory:update", "inventory:delete", "inventory:manage_repairs"]
+    },
+    "SimCardManagementPage": {
+      "path": "/sim-cards",
+      "icon": "sim",
+      "order": 5,
+      "category": "SIM Management",
+      "requiredPermissions": ["simcard:read"],
+      "optionalPermissions": ["simcard:create", "simcard:update", "simcard:delete", "simcard:link_device"]
+    },
+    "MasterDataManagementPage": {
+      "path": "/master-data",
+      "icon": "database",
+      "order": 6,
+      "category": "Master Data",
+      "requiredPermissions": ["masterdata:read"],
+      "optionalPermissions": ["masterdata:create", "masterdata:update", "masterdata:delete"]
+    },
+    "PermissionsManagementPage": {
+      "path": "/permissions",
+      "icon": "shield",
+      "order": 7,
+      "category": "System Administration",
+      "requiredPermissions": ["permission:read"],
+      "optionalPermissions": ["permission:manage", "permission:assign_role", "permission:create_role"]
+    },
+    "UserManagementPage": {
+      "path": "/users",
+      "icon": "users",
+      "order": 8,
+      "category": "User Management",
+      "requiredPermissions": ["user:read"],
+      "optionalPermissions": ["user:create", "user:update", "user:delete", "user:manage"]
+    },
+    "CustomerDashboardPage": {
+      "path": "/customer/dashboard",
+      "icon": "customer",
+      "order": 9,
+      "category": "Customer Portal",
+      "requiredPermissions": ["customer:read_dashboard"],
+      "optionalPermissions": ["customer:control_devices", "customer:export_data"]
+    },
+    "AlertsPage": {
+      "path": "/alerts",
+      "icon": "alert",
+      "order": 10,
+      "category": "Alerts",
+      "requiredPermissions": ["alert:read"],
+      "optionalPermissions": ["alert:acknowledge", "alert:resolve", "alert:manage"]
+    }
+  }
+}

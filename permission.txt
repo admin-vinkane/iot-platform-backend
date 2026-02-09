@@ -1,0 +1,436 @@
+{
+  "version": "1.0",
+  "generatedFrom": [
+    "src/types/permissions.ts",
+    "src/utils/permissionScanner.ts"
+  ],
+  "roles": [
+    "Administrator",
+    "Device Manager",
+    "Installation Manager",
+    "Inventory Manager",
+    "SIM Manager",
+    "Data Manager",
+    "Operator",
+    "Viewer",
+    "Customer",
+    "Customer Super User"
+  ],
+  "permissions": [
+    "can_view_dashboard",
+    "can_view_stats",
+    "can_toggle_motor_status",
+    "can_view_device_config",
+    "can_add_devices",
+    "can_edit_devices",
+    "can_delete_devices",
+    "can_register_devices",
+    "can_view_device_audit",
+    "can_view_installations",
+    "can_add_installations",
+    "can_edit_installations",
+    "can_delete_installations",
+    "can_link_devices",
+    "can_unlink_devices",
+    "can_add_contacts",
+    "can_edit_contacts",
+    "can_delete_contacts",
+    "can_capture_location",
+    "can_view_installation_audit",
+    "can_view_inventory",
+    "can_add_inventory_devices",
+    "can_edit_inventory_devices",
+    "can_delete_inventory_devices",
+    "can_add_repairs",
+    "can_edit_repairs",
+    "can_delete_repairs",
+    "can_view_repair_history",
+    "can_view_sim_cards",
+    "can_add_sim_cards",
+    "can_edit_sim_cards",
+    "can_delete_sim_cards",
+    "can_link_sim_devices",
+    "can_unlink_sim_devices",
+    "can_view_sim_audit",
+    "can_view_master_data",
+    "can_add_master_data",
+    "can_edit_master_data",
+    "can_delete_master_data",
+    "can_view_master_data_audit",
+    "can_view_audit_trails",
+    "can_export_data",
+    "can_manage_users",
+    "can_manage_system_settings",
+    "can_manage_permissions",
+    "can_view_permissions",
+    "can_assign_roles",
+    "can_create_roles",
+    "can_edit_roles",
+    "can_delete_roles",
+    "can_view_navigation",
+    "can_add_navigation",
+    "can_edit_navigation",
+    "can_delete_navigation",
+    "can_reorder_navigation",
+    "can_view_navigation_audit",
+    "can_manage_navigation",
+    "can_view_customer_dashboard",
+    "can_control_customer_devices",
+    "can_view_customer_runtime",
+    "can_export_customer_data",
+    "can_view_customer_alerts",
+    "can_acknowledge_alerts",
+    "can_resolve_alerts",
+    "can_view_admin_customer_monitor",
+    "can_view_all_organizations",
+    "can_view_cross_organization_devices",
+    "can_admin_override_control",
+    "can_bulk_device_control",
+    "can_view_control_audit",
+    "can_view_activity_logs",
+    "can_view_device_analytics",
+    "can_manage_organization_alerts"
+  ],
+  "rolePermissions": {
+    "Administrator": [
+      "can_view_dashboard",
+      "can_view_stats",
+      "can_toggle_motor_status",
+      "can_view_device_config",
+      "can_add_devices",
+      "can_edit_devices",
+      "can_delete_devices",
+      "can_register_devices",
+      "can_view_device_audit",
+      "can_view_installations",
+      "can_add_installations",
+      "can_edit_installations",
+      "can_delete_installations",
+      "can_link_devices",
+      "can_unlink_devices",
+      "can_add_contacts",
+      "can_edit_contacts",
+      "can_delete_contacts",
+      "can_capture_location",
+      "can_view_installation_audit",
+      "can_view_inventory",
+      "can_add_inventory_devices",
+      "can_edit_inventory_devices",
+      "can_delete_inventory_devices",
+      "can_add_repairs",
+      "can_edit_repairs",
+      "can_delete_repairs",
+      "can_view_repair_history",
+      "can_view_sim_cards",
+      "can_add_sim_cards",
+      "can_edit_sim_cards",
+      "can_delete_sim_cards",
+      "can_link_sim_devices",
+      "can_unlink_sim_devices",
+      "can_view_sim_audit",
+      "can_view_master_data",
+      "can_add_master_data",
+      "can_edit_master_data",
+      "can_delete_master_data",
+      "can_view_master_data_audit",
+      "can_view_audit_trails",
+      "can_export_data",
+      "can_manage_users",
+      "can_manage_system_settings",
+      "can_manage_permissions",
+      "can_view_permissions",
+      "can_assign_roles",
+      "can_create_roles",
+      "can_edit_roles",
+      "can_delete_roles",
+      "can_view_navigation",
+      "can_add_navigation",
+      "can_edit_navigation",
+      "can_delete_navigation",
+      "can_reorder_navigation",
+      "can_view_navigation_audit",
+      "can_manage_navigation",
+      "can_view_customer_dashboard",
+      "can_control_customer_devices",
+      "can_view_customer_runtime",
+      "can_export_customer_data",
+      "can_view_customer_alerts",
+      "can_acknowledge_alerts",
+      "can_resolve_alerts",
+      "can_view_admin_customer_monitor",
+      "can_view_all_organizations",
+      "can_view_cross_organization_devices",
+      "can_admin_override_control",
+      "can_bulk_device_control",
+      "can_view_control_audit",
+      "can_view_activity_logs",
+      "can_view_device_analytics",
+      "can_manage_organization_alerts"
+    ],
+    "Device Manager": [
+      "can_view_dashboard",
+      "can_view_stats",
+      "can_toggle_motor_status",
+      "can_view_device_config",
+      "can_add_devices",
+      "can_edit_devices",
+      "can_register_devices",
+      "can_view_device_audit",
+      "can_view_installations",
+      "can_edit_installations",
+      "can_link_devices",
+      "can_unlink_devices",
+      "can_capture_location",
+      "can_view_installation_audit"
+    ],
+    "Installation Manager": [
+      "can_view_dashboard",
+      "can_view_stats",
+      "can_view_installations",
+      "can_add_installations",
+      "can_edit_installations",
+      "can_add_contacts",
+      "can_edit_contacts",
+      "can_delete_contacts",
+      "can_capture_location",
+      "can_view_installation_audit"
+    ],
+    "Inventory Manager": [
+      "can_view_dashboard",
+      "can_view_stats",
+      "can_view_inventory",
+      "can_add_inventory_devices",
+      "can_edit_inventory_devices",
+      "can_add_repairs",
+      "can_edit_repairs",
+      "can_view_repair_history"
+    ],
+    "SIM Manager": [
+      "can_view_dashboard",
+      "can_view_stats",
+      "can_view_sim_cards",
+      "can_add_sim_cards",
+      "can_edit_sim_cards",
+      "can_link_sim_devices",
+      "can_unlink_sim_devices",
+      "can_view_sim_audit"
+    ],
+    "Data Manager": [
+      "can_view_dashboard",
+      "can_view_stats",
+      "can_view_master_data",
+      "can_add_master_data",
+      "can_edit_master_data",
+      "can_view_master_data_audit"
+    ],
+    "Operator": [
+      "can_view_dashboard",
+      "can_view_stats",
+      "can_toggle_motor_status",
+      "can_view_installations",
+      "can_view_device_config",
+      "can_view_inventory",
+      "can_view_sim_cards"
+    ],
+    "Viewer": [
+      "can_view_dashboard",
+      "can_view_stats",
+      "can_view_installations",
+      "can_view_device_config",
+      "can_view_inventory",
+      "can_view_sim_cards",
+      "can_view_master_data"
+    ],
+    "Customer": [
+      "can_view_customer_dashboard",
+      "can_control_customer_devices",
+      "can_view_customer_runtime",
+      "can_export_customer_data",
+      "can_view_customer_alerts",
+      "can_acknowledge_alerts"
+    ],
+    "Customer Super User": [
+      "can_view_customer_dashboard",
+      "can_control_customer_devices",
+      "can_view_customer_runtime",
+      "can_export_customer_data",
+      "can_view_customer_alerts",
+      "can_acknowledge_alerts",
+      "can_resolve_alerts"
+    ]
+  },
+  "components": {
+    "DashboardPage": {
+      "file": "src/App.tsx",
+      "permissions": ["can_view_dashboard", "can_view_stats", "can_toggle_motor_status"],
+      "description": "Main dashboard with stats and device controls",
+      "category": "Dashboard"
+    },
+    "StatsCard": {
+      "file": "src/components/StatsCard.tsx",
+      "permissions": ["can_view_stats"],
+      "description": "Statistics display cards",
+      "category": "Dashboard"
+    },
+    "DeviceTable": {
+      "file": "src/components/DeviceTable.tsx",
+      "permissions": ["can_view_dashboard", "can_toggle_motor_status"],
+      "description": "Device management table with controls",
+      "category": "Dashboard"
+    },
+    "MotorCard": {
+      "file": "src/components/MotorCard.tsx",
+      "permissions": ["can_toggle_motor_status"],
+      "description": "Individual motor control card",
+      "category": "Dashboard"
+    },
+    "DeviceConfigurationPage": {
+      "file": "src/pages/DeviceConfiguration.tsx",
+      "permissions": [
+        "can_view_device_config",
+        "can_add_devices",
+        "can_edit_devices",
+        "can_delete_devices",
+        "can_register_devices",
+        "can_view_device_audit"
+      ],
+      "description": "Device configuration management page",
+      "category": "Device Management"
+    },
+    "DeviceConfigurationForm": {
+      "file": "src/components/DeviceConfigurationForm.tsx",
+      "permissions": ["can_add_devices", "can_edit_devices", "can_register_devices"],
+      "description": "Form for adding/editing device configurations",
+      "category": "Device Management"
+    },
+    "DeviceConfigurationTable": {
+      "file": "src/components/DeviceConfigurationTable.tsx",
+      "permissions": ["can_view_device_config", "can_edit_devices", "can_delete_devices"],
+      "description": "Table displaying device configurations",
+      "category": "Device Management"
+    },
+    "DeviceAuditTrailModal": {
+      "file": "src/components/DeviceAuditTrailModal.tsx",
+      "permissions": ["can_view_device_audit"],
+      "description": "Modal showing device audit trail",
+      "category": "Device Management"
+    },
+    "InstallationManagementPage": {
+      "file": "src/pages/InstallationManagement.tsx",
+      "permissions": [
+        "can_view_installations",
+        "can_add_installations",
+        "can_edit_installations",
+        "can_link_devices",
+        "can_unlink_devices",
+        "can_add_contacts",
+        "can_edit_contacts",
+        "can_delete_contacts",
+        "can_capture_location"
+      ],
+      "description": "Installation management page",
+      "category": "Installation Management"
+    },
+    "InstallationForm": {
+      "file": "src/components/InstallationForm.tsx",
+      "permissions": ["can_add_installations", "can_edit_installations"],
+      "description": "Form for creating/editing installations",
+      "category": "Installation Management"
+    },
+    "DeviceLinkingModal": {
+      "file": "src/components/DeviceLinkingModal.tsx",
+      "permissions": ["can_link_devices", "can_unlink_devices"],
+      "description": "Modal for linking/unlinking devices",
+      "category": "Installation Management"
+    },
+    "LocationCapture": {
+      "file": "src/components/LocationCapture.tsx",
+      "permissions": ["can_capture_location"],
+      "description": "Component for capturing device locations",
+      "category": "Installation Management"
+    },
+    "ContactForm": {
+      "file": "src/components/ContactForm.tsx",
+      "permissions": ["can_add_contacts", "can_edit_contacts"],
+      "description": "Form for managing user contacts",
+      "category": "Installation Management"
+    },
+    "DeviceInventoryPage": {
+      "file": "src/pages/DeviceInventory.tsx",
+      "permissions": [
+        "can_view_inventory",
+        "can_add_inventory_devices",
+        "can_edit_inventory_devices",
+        "can_delete_inventory_devices",
+        "can_add_repairs",
+        "can_edit_repairs",
+        "can_view_repair_history"
+      ],
+      "description": "Device inventory management page",
+      "category": "Inventory Management"
+    },
+    "DeviceInventoryForm": {
+      "file": "src/components/DeviceInventoryForm.tsx",
+      "permissions": ["can_add_inventory_devices", "can_edit_inventory_devices"],
+      "description": "Form for managing inventory devices",
+      "category": "Inventory Management"
+    },
+    "RepairForm": {
+      "file": "src/components/RepairForm.tsx",
+      "permissions": ["can_add_repairs", "can_edit_repairs"],
+      "description": "Form for managing device repairs",
+      "category": "Inventory Management"
+    },
+    "SimCardManagementPage": {
+      "file": "src/pages/SimCardManagement.tsx",
+      "permissions": [
+        "can_view_sim_cards",
+        "can_add_sim_cards",
+        "can_edit_sim_cards",
+        "can_delete_sim_cards",
+        "can_link_sim_devices",
+        "can_unlink_sim_devices",
+        "can_view_sim_audit"
+      ],
+      "description": "SIM card management page",
+      "category": "SIM Management"
+    },
+    "SimCardForm": {
+      "file": "src/components/SimCardForm.tsx",
+      "permissions": ["can_add_sim_cards", "can_edit_sim_cards"],
+      "description": "Form for managing SIM cards",
+      "category": "SIM Management"
+    },
+    "MasterDataManagementPage": {
+      "file": "src/pages/MasterDataManagement.tsx",
+      "permissions": [
+        "can_view_master_data",
+        "can_add_master_data",
+        "can_edit_master_data",
+        "can_delete_master_data",
+        "can_view_master_data_audit"
+      ],
+      "description": "Master data management page",
+      "category": "Master Data"
+    },
+    "MasterDataForm": {
+      "file": "src/components/MasterDataForm.tsx",
+      "permissions": ["can_add_master_data", "can_edit_master_data"],
+      "description": "Form for managing master data entities",
+      "category": "Master Data"
+    },
+    "PermissionsManagementPage": {
+      "file": "src/pages/PermissionsManagement.tsx",
+      "permissions": [
+        "can_view_permissions",
+        "can_manage_permissions",
+        "can_assign_roles",
+        "can_create_roles",
+        "can_edit_roles",
+        "can_delete_roles"
+      ],
+      "description": "Permissions and role management page",
+      "category": "System Administration"
+    }
+  }
+}

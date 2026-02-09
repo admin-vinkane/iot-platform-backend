@@ -2437,6 +2437,681 @@ curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users
 
 ---
 
+## 3.1. RBAC (Role-Based Access Control) API
+
+**Status:** ✅ Fully Implemented and Seeded (February 9, 2026)
+
+**Lambda:** v_users_api (version 20260209031653)
+
+**Authentication:** DEV_MODE enabled - bypasses authentication for development
+
+### Overview
+
+The RBAC system provides fine-grained permission management for the IoT platform. It includes:
+- **69 Permissions** across 10 categories (dashboard, device, installation, inventory, sim, data, user, customer, alert, admin)
+- **10 Roles** with varying permission levels (0-100)
+- **132 Role-Permission** assignments
+- **10 UI Components** with required permissions
+- **User-Role** assignments with optional expiration
+
+### Permission Naming Convention
+Permissions follow the format: `resource:action`
+- Examples: `device:read`, `device:create`, `dashboard:read`, `user:manage`
+
+### Seeded Data Summary
+```
+✅ 69 Permissions created
+✅ 10 Roles created
+✅ 132 Role-Permission assignments
+✅ 10 UI Components created
+✅ 1 User-Role assignment (nagendrantn@gmail.com → device_manager)
+```
+
+---
+
+### 3.1.1. Permissions API
+
+#### POST /users/permissions
+**Description:** Create a new permission  
+**Required Fields:** permissionName (format: `resource:action`), displayName, resource, action, category  
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "permissionName": "device:read",
+    "displayName": "Read Device",
+    "description": "View device information",
+    "resource": "device",
+    "action": "read",
+    "category": "Device Management"
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "message": "Permission created successfully",
+  "data": {
+    "permissionName": "device:read",
+    "displayName": "Read Device",
+    "description": "View device information",
+    "resource": "device",
+    "action": "read",
+    "category": "Device Management",
+    "createdAt": "2026-02-09T03:11:21.027760",
+    "updatedAt": "2026-02-09T03:11:21.027760",
+    "createdBy": "dev-admin-uid"
+  }
+}
+```
+
+#### GET /users/permissions
+**Description:** List all permissions (70 total including test:read)  
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Permissions retrieved successfully",
+  "data": [
+    {
+      "permissionName": "dashboard:read",
+      "displayName": "Read Dashboard",
+      "description": "View dashboard and metrics",
+      "resource": "dashboard",
+      "action": "read",
+      "category": "Dashboard",
+      "createdAt": "2026-02-09T03:11:21.027760",
+      "updatedAt": "2026-02-09T03:11:21.027760",
+      "createdBy": "dev-admin-uid"
+    }
+  ],
+  "meta": {
+    "count": 70
+  }
+}
+```
+
+#### GET /users/permissions/{permissionName}
+**Description:** Get a specific permission by name  
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/device:read"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Permission retrieved successfully",
+  "data": {
+    "permissionName": "device:read",
+    "displayName": "Read Device",
+    "description": "View device information",
+    "resource": "device",
+    "action": "read",
+    "category": "Device Management",
+    "createdAt": "2026-02-09T03:11:21.027760",
+    "updatedAt": "2026-02-09T03:11:21.027760",
+    "createdBy": "dev-admin-uid"
+  }
+}
+```
+
+---
+
+### 3.1.2. Roles API
+
+#### POST /users/permissions/roles
+**Description:** Create a new role  
+**Required Fields:** roleName, displayName  
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "roleName": "device_manager",
+    "displayName": "Device Manager",
+    "description": "Manages devices and installations",
+    "level": 60,
+    "isSystem": false
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "message": "Role created successfully",
+  "data": {
+    "roleName": "device_manager",
+    "displayName": "Device Manager",
+    "description": "Manages devices and installations",
+    "level": 60,
+    "isSystem": false,
+    "createdAt": "2026-02-09T03:11:55.861571",
+    "updatedAt": "2026-02-09T03:11:55.861571",
+    "createdBy": "dev-admin-uid"
+  }
+}
+```
+
+#### GET /users/permissions/roles
+**Description:** List all roles (10 total)  
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Roles retrieved successfully",
+  "data": [
+    {
+      "roleName": "admin",
+      "displayName": "Administrator",
+      "description": "Full system access with all permissions",
+      "level": 100,
+      "isSystem": true,
+      "createdAt": "2026-02-09T03:11:55.801791",
+      "updatedAt": "2026-02-09T03:11:55.801791",
+      "createdBy": "dev-admin-uid"
+    },
+    {
+      "roleName": "device_manager",
+      "displayName": "Device Manager",
+      "description": "Manages devices and installations",
+      "level": 60,
+      "isSystem": false,
+      "createdAt": "2026-02-09T03:11:55.861571",
+      "updatedAt": "2026-02-09T03:11:55.861571",
+      "createdBy": "dev-admin-uid"
+    }
+  ],
+  "meta": {
+    "count": 10
+  }
+}
+```
+
+**Available Roles:**
+- `admin` (level 100) - Full system access with all 69 permissions
+- `device_manager` (level 60) - 13 device and installation permissions
+- `installation_manager` (level 50) - 7 installation management permissions
+- `inventory_manager` (level 50) - 6 inventory and repair permissions
+- `sim_manager` (level 50) - 7 SIM card management permissions
+- `data_manager` (level 50) - 5 data management permissions
+- `operator` (level 30) - 6 operational permissions
+- `viewer` (level 10) - 6 view-only permissions
+- `customer` (level 20) - 6 customer portal permissions
+- `customer_super_user` (level 25) - 7 enhanced customer permissions
+
+#### GET /users/permissions/roles/{roleName}
+**Description:** Get a specific role by name  
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/admin"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Role retrieved successfully",
+  "data": {
+    "roleName": "admin",
+    "displayName": "Administrator",
+    "description": "Full system access with all permissions",
+    "level": 100,
+    "isSystem": true,
+    "createdAt": "2026-02-09T03:11:55.801791",
+    "updatedAt": "2026-02-09T03:11:55.801791",
+    "createdBy": "dev-admin-uid"
+  }
+}
+```
+
+#### PUT /users/permissions/roles/{roleName}
+**Description:** Update an existing role (cannot update system roles)  
+**Request:**
+```bash
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/device_manager" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "displayName": "Senior Device Manager",
+    "description": "Manages all devices and installations",
+    "level": 65
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "message": "Role updated successfully",
+  "data": {
+    "roleName": "device_manager",
+    "displayName": "Senior Device Manager",
+    "description": "Manages all devices and installations",
+    "level": 65,
+    "isSystem": false,
+    "createdAt": "2026-02-09T03:11:55.861571",
+    "updatedAt": "2026-02-09T03:15:00.000000",
+    "createdBy": "dev-admin-uid"
+  }
+}
+```
+
+#### DELETE /users/permissions/roles/{roleName}
+**Description:** Delete a role (cannot delete system roles)  
+**Request:**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/custom_role"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Role 'custom_role' deleted successfully"
+}
+```
+
+---
+
+### 3.1.3. Role-Permission Assignments
+
+#### POST /users/permissions/roles/{roleName}/permissions
+**Description:** Assign a permission to a role  
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/device_manager/permissions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "permissionName": "device:read"
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "message": "Permission assigned to role successfully",
+  "data": {
+    "roleName": "device_manager",
+    "permissionName": "device:read",
+    "assignedAt": "2026-02-09T03:11:57.123456",
+    "assignedBy": "dev-admin-uid"
+  }
+}
+```
+
+#### GET /users/permissions/roles/{roleName}/permissions
+**Description:** Get all permissions for a role  
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/admin/permissions"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Role permissions retrieved successfully",
+  "data": [
+    {
+      "permissionName": "dashboard:read",
+      "displayName": "Read Dashboard",
+      "description": "View dashboard and metrics",
+      "resource": "dashboard",
+      "action": "read",
+      "category": "Dashboard"
+    },
+    {
+      "permissionName": "device:read",
+      "displayName": "Read Device",
+      "description": "View device information",
+      "resource": "device",
+      "action": "read",
+      "category": "Device Management"
+    }
+  ],
+  "meta": {
+    "count": 69
+  }
+}
+```
+
+**Example: Device Manager Role (13 permissions):**
+```json
+{
+  "meta": {
+    "count": 13
+  },
+  "data": [
+    {"permissionName": "dashboard:read"},
+    {"permissionName": "device:read"},
+    {"permissionName": "device:create"},
+    {"permissionName": "device:update"},
+    {"permissionName": "device:control"},
+    {"permissionName": "device:audit"},
+    {"permissionName": "installation:read"},
+    {"permissionName": "installation:create"},
+    {"permissionName": "installation:update"},
+    {"permissionName": "installation:delete"},
+    {"permissionName": "installation:audit"},
+    {"permissionName": "installation:link_device"},
+    {"permissionName": "installation:unlink_device"}
+  ]
+}
+```
+
+#### DELETE /users/permissions/roles/{roleName}/permissions/{permissionName}
+**Description:** Remove a permission from a role  
+**Request:**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/device_manager/permissions/device:delete"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Permission removed from role successfully"
+}
+```
+
+---
+
+### 3.1.4. User-Role Assignments
+
+#### POST /users/permissions/users/{userId}/roles
+**Description:** Assign a role to a user  
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/users/nagendrantn@gmail.com/roles" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "nagendrantn@gmail.com",
+    "roleName": "device_manager",
+    "assignedBy": "admin@vinkane.com",
+    "expiresAt": "2027-02-09T00:00:00Z"
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "message": "Role assigned to user successfully",
+  "data": {
+    "userId": "nagendrantn@gmail.com",
+    "roleName": "device_manager",
+    "assignedAt": "2026-02-09T03:11:57.500000",
+    "assignedBy": "admin@vinkane.com",
+    "expiresAt": "2027-02-09T00:00:00Z"
+  }
+}
+```
+
+#### GET /users/permissions/users/{userId}/roles
+**Description:** Get all roles assigned to a user  
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/users/nagendrantn@gmail.com/roles"
+```
+
+**Response (200):**
+```json
+{
+  "message": "User roles retrieved successfully",
+  "data": [
+    {
+      "roleName": "device_manager",
+      "displayName": "Device Manager",
+      "description": "Manages devices and installations",
+      "level": 60,
+      "isSystem": false,
+      "assignedAt": "2026-02-09T03:11:57.500000",
+      "assignedBy": "admin@vinkane.com",
+      "expiresAt": "2027-02-09T00:00:00Z"
+    }
+  ],
+  "meta": {
+    "count": 1
+  }
+}
+```
+
+#### GET /users/permissions/users/{userId}/permissions
+**Description:** Get computed permissions for a user (from all assigned roles)  
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/users/nagendrantn@gmail.com/permissions"
+```
+
+**Response (200):**
+```json
+{
+  "message": "User permissions computed successfully",
+  "data": [
+    {
+      "permissionName": "dashboard:read",
+      "displayName": "Read Dashboard",
+      "resource": "dashboard",
+      "action": "read",
+      "category": "Dashboard"
+    },
+    {
+      "permissionName": "device:read",
+      "displayName": "Read Device",
+      "resource": "device",
+      "action": "read",
+      "category": "Device Management"
+    },
+    {
+      "permissionName": "device:create",
+      "displayName": "Create Device",
+      "resource": "device",
+      "action": "create",
+      "category": "Device Management"
+    },
+    {
+      "permissionName": "device:update",
+      "displayName": "Update Device",
+      "resource": "device",
+      "action": "update",
+      "category": "Device Management"
+    },
+    {
+      "permissionName": "device:control",
+      "displayName": "Control Device",
+      "resource": "device",
+      "action": "control",
+      "category": "Device Management"
+    }
+  ],
+  "meta": {
+    "count": 13
+  }
+}
+```
+
+#### DELETE /users/permissions/users/{userId}/roles/{roleName}
+**Description:** Remove a role from a user  
+**Request:**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/users/nagendrantn@gmail.com/roles/device_manager"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Role removed from user successfully"
+}
+```
+
+---
+
+### 3.1.5. UI Components API
+
+#### POST /users/permissions/components
+**Description:** Create a UI component with permission requirements  
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/components" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "componentName": "DeviceConfigurationPage",
+    "path": "/devices",
+    "icon": "settings",
+    "order": 1,
+    "category": "Device Management",
+    "requiredPermissions": ["device:read"],
+    "optionalPermissions": ["device:create", "device:update"]
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "message": "Component created successfully",
+  "data": {
+    "componentName": "DeviceConfigurationPage",
+    "path": "/devices",
+    "icon": "settings",
+    "order": 1,
+    "category": "Device Management",
+    "requiredPermissions": ["device:read"],
+    "optionalPermissions": ["device:create", "device:update"],
+    "createdAt": "2026-02-09T03:11:57.800000",
+    "updatedAt": "2026-02-09T03:11:57.800000",
+    "createdBy": "dev-admin-uid"
+  }
+}
+```
+
+#### GET /users/permissions/components
+**Description:** List all UI components (sorted by order)  
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/components"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Components retrieved successfully",
+  "data": [
+    {
+      "componentName": "DashboardPage",
+      "path": "/dashboard",
+      "icon": "dashboard",
+      "order": 0,
+      "category": "Overview",
+      "requiredPermissions": ["dashboard:read"],
+      "optionalPermissions": []
+    },
+    {
+      "componentName": "DeviceConfigurationPage",
+      "path": "/devices",
+      "icon": "settings",
+      "order": 1,
+      "category": "Device Management",
+      "requiredPermissions": ["device:read"],
+      "optionalPermissions": ["device:create", "device:update"]
+    },
+    {
+      "componentName": "InstallationManagementPage",
+      "path": "/installations",
+      "icon": "build",
+      "order": 2,
+      "category": "Installation",
+      "requiredPermissions": ["installation:read"],
+      "optionalPermissions": ["installation:create", "installation:update"]
+    }
+  ],
+  "meta": {
+    "count": 10
+  }
+}
+```
+
+**All 10 Seeded Components:**
+1. DashboardPage - `/dashboard`
+2. DeviceConfigurationPage - `/devices`
+3. InstallationManagementPage - `/installations`
+4. DeviceInventoryPage - `/inventory`
+5. SimCardManagementPage - `/sim-cards`
+6. MasterDataManagementPage - `/master-data`
+7. PermissionsManagementPage - `/permissions`
+8. UserManagementPage - `/users`
+9. CustomerDashboardPage - `/customer-dashboard`
+10. AlertsPage - `/alerts`
+
+---
+
+### 3.1.6. RBAC Implementation Details
+
+#### Path Normalization
+API Gateway v2 (HTTP API) includes the stage prefix in the path. The Lambda automatically normalizes paths:
+- Incoming: `/dev/users/permissions` → Normalized: `/permissions`
+- Incoming: `/dev/users/permissions/roles/admin` → Normalized: `/permissions/roles/admin`
+
+#### Permission Checking
+The Lambda checks permissions using the `check_permission()` function:
+- `permission:read` - Required for listing/viewing permissions and roles
+- `permission:manage` - Required for creating/updating/deleting permissions and roles
+- `permission:assign_role` - Required for assigning/removing roles to/from users
+
+#### DEV_MODE
+When `DEV_MODE=true`, authentication is bypassed and a mock admin user is used:
+```json
+{
+  "uid": "dev-admin-uid",
+  "email": "dev-admin@test.com",
+  "email_verified": true,
+  "name": "Dev Admin",
+  "role": "admin"
+}
+```
+
+#### DynamoDB Schema
+**Entity Types:**
+- `ROLE` - Role metadata (PK: `ROLE#{roleName}`, SK: `META`)
+- `PERMISSION` - Permission metadata (PK: `PERMISSION#{permissionName}`, SK: `META`)
+- `ROLE_PERMISSION` - Assignment (PK: `ROLE#{roleName}`, SK: `PERMISSION#{permissionName}`)
+- `USER_ROLE` - Assignment (PK: `USER#{userId}`, SK: `ROLE#{roleName}`)
+- `COMPONENT` - UI component (PK: `COMPONENT#{componentName}`, SK: `META`)
+
+#### Common Errors
+
+**403 Insufficient permissions:**
+```json
+{
+  "error": "Insufficient permissions. Required: permission:manage"
+}
+```
+
+**404 Role not found:**
+```json
+{
+  "error": "Role 'unknown_role' not found"
+}
+```
+
+**409 Already exists:**
+```json
+{
+  "error": "Permission 'device:read' already exists"
+}
+```
+
+**403 Cannot update system roles:**
+```json
+{
+  "error": "Cannot update system roles"
+}
+```
+
+---
+
 ## 4. REGIONS API
 
 ### GET /regions/hierarchy
@@ -3606,6 +4281,26 @@ curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/instal
   }'
 ```
 
+**Request (With Warranty Calculation):**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "StateId": "TS",
+    "DistrictId": "HYD",
+    "MandalId": "SRNAGAR",
+    "VillageId": "VILLAGE001",
+    "HabitationId": "005",
+    "PrimaryDevice": "water",
+    "Status": "active",
+    "InstallationDate": "2026-01-31T00:00:00.000Z",
+    "ActivationDate": "2026-02-01T00:00:00.000Z",
+    "WarrantyPeriodMonths": 12,
+    "CreatedBy": "admin@example.com"
+  }'
+```
+**Note:** When `ActivationDate` and `WarrantyPeriodMonths` are provided, `WarrantyDate` is automatically calculated as `ActivationDate + WarrantyPeriodMonths`.
+
 **Response (201):**
 ```json
 {
@@ -3689,9 +4384,17 @@ curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/instal
 **Optional Fields:**
 - `CustomerId` - Customer reference ID (validated if provided)
 - `TemplateId` - Template reference ID (validated if provided)
-- `WarrantyDate` - ISO 8601 date string
+- `WarrantyDate` - ISO 8601 date string (can be directly provided or auto-calculated)
+- `ActivationDate` - ISO 8601 date string (activation date for warranty calculation)
+- `WarrantyPeriodMonths` - Integer (warranty duration in months)
 - `CreatedBy` - User who created the installation (defaults to `"system"`)
 - `deviceIds` - Array of device IDs to link during creation (e.g., `["DEV001", "DEV002"]`)
+
+**Warranty Calculation Logic:**
+- If both `ActivationDate` and `WarrantyPeriodMonths` are provided, `WarrantyDate` is automatically calculated
+- Formula: `WarrantyDate = ActivationDate + WarrantyPeriodMonths` (using accurate month arithmetic)
+- Example: ActivationDate "2026-02-04" + 12 months = WarrantyDate "2027-02-04"
+- If `WarrantyDate` is directly provided, it takes precedence over auto-calculation (legacy support)
 
 **Auto-Generated Fields:**
 - `InstallationId` - UUID automatically generated by the system
@@ -3847,7 +4550,19 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/install
 
 ### PUT /installs/{installId}
 **Description:** Update installation details  
-**Request:**
+
+**Updatable Fields:**
+- `status` - Installation status ("active" or "inactive")
+- `primaryDevice` - Primary device type ("water", "chlorine", or "none")
+- `warrantyDate` - Direct warranty date (ISO 8601 format)
+- `activationDate` - Activation date for warranty calculation
+- `warrantyPeriodMonths` - Warranty duration in months
+- `installationDate` - Installation date
+- `customerId` - Customer reference ID
+- `templateId` - Template reference ID
+- `updatedBy` - User performing the update
+
+**Request (Basic Update):**
 ```bash
 curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/INST-HAB-001" \
   -H "Content-Type: application/json" \
@@ -3858,6 +4573,40 @@ curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/install
     "updatedBy": "admin"
   }'
 ```
+
+**Request (Update Warranty Period - Auto-calculates WarrantyDate):**
+```bash
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/c1c92596-d3e0-4d6b-bc0e-1b0a5a1696f4" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "warrantyPeriodMonths": 24,
+    "updatedBy": "admin"
+  }'
+```
+**Note:** When updating only `warrantyPeriodMonths`, the existing `activationDate` is used for calculation.
+
+**Request (Update Activation Date - Auto-calculates WarrantyDate):**
+```bash
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/c1c92596-d3e0-4d6b-bc0e-1b0a5a1696f4" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "activationDate": "2026-03-01",
+    "updatedBy": "admin"
+  }'
+```
+**Note:** When updating only `activationDate`, the existing `warrantyPeriodMonths` is used for calculation.
+
+**Request (Update Both - Auto-calculates WarrantyDate):**
+```bash
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/installs/c1c92596-d3e0-4d6b-bc0e-1b0a5a1696f4" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "activationDate": "2026-01-15",
+    "warrantyPeriodMonths": 36,
+    "updatedBy": "admin"
+  }'
+```
+**Note:** WarrantyDate = ActivationDate + WarrantyPeriodMonths (2026-01-15 + 36 months = 2029-01-15)
 
 **Response (200):**
 ```json
@@ -3876,9 +4625,11 @@ curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/install
     "PrimaryDevice": "chlorine",
     "Status": "inactive",
     "InstallationDate": "2026-01-29T00:00:00.000Z",
-    "WarrantyDate": "2028-01-29T00:00:00.000Z",
+    "ActivationDate": "2026-01-15",
+    "WarrantyPeriodMonths": 36,
+    "WarrantyDate": "2029-01-15",
     "CreatedDate": "2026-01-29T07:21:27.552251Z",
-    "UpdatedDate": "2026-01-29T08:07:51.136123Z",
+    "UpdatedDate": "2026-02-04T11:46:21.787461Z",
     "CreatedBy": "system",
     "UpdatedBy": "admin",
     "changeHistory": [
@@ -3896,17 +4647,40 @@ curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/install
             "newValue": "chlorine"
           }
         }
+      },
+      {
+        "timestamp": "2026-02-04T11:46:21.787461Z",
+        "updatedBy": "admin",
+        "ipAddress": "49.205.248.150",
+        "changes": {
+          "ActivationDate": {
+            "oldValue": "2026-03-01",
+            "newValue": "2026-01-15"
+          },
+          "WarrantyPeriodMonths": {
+            "oldValue": 18,
+            "newValue": 36
+          },
+          "WarrantyDate": {
+            "oldValue": "2027-09-01",
+            "newValue": "2029-01-15"
+          }
+        }
       }
     ]
   },
   "changes": {
-    "Status": {
-      "oldValue": "active",
-      "newValue": "inactive"
+    "ActivationDate": {
+      "oldValue": "2026-03-01",
+      "newValue": "2026-01-15"
     },
-    "PrimaryDevice": {
-      "oldValue": "water",
-      "newValue": "chlorine"
+    "WarrantyPeriodMonths": {
+      "oldValue": 18,
+      "newValue": 36
+    },
+    "WarrantyDate": {
+      "oldValue": "2027-09-01",
+      "newValue": "2029-01-15"
     }
   }
 }
@@ -3915,11 +4689,19 @@ curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/install
 **Updatable Fields:**
 - `status` - "active" or "inactive"
 - `primaryDevice` - "water", "chlorine", or "none"
-- `warrantyDate` - ISO 8601 date string
+- `warrantyDate` - ISO 8601 date string (direct update)
+- `activationDate` - ISO 8601 date string (triggers warranty recalculation)
+- `warrantyPeriodMonths` - Integer (triggers warranty recalculation)
 - `installationDate` - ISO 8601 date string
 - `customerId` - Customer reference
 - `templateId` - Template reference
 - `updatedBy` - User making the update (recommended)
+
+**Warranty Calculation:**
+- When `activationDate` or `warrantyPeriodMonths` is updated, `warrantyDate` is automatically recalculated
+- If only one field is updated, the existing value of the other field is used for calculation
+- Formula: `WarrantyDate = ActivationDate + WarrantyPeriodMonths` (accurate month arithmetic)
+- Direct `warrantyDate` updates skip auto-calculation (legacy support)
 
 **Features:**
 - Only updates fields that have changed
@@ -4339,10 +5121,16 @@ Access-Control-Expose-Headers: content-length,content-type
 
 ## Notes
 
-1. **Authentication**: Currently not implemented. All endpoints are publicly accessible.
-2. **Data Format**: All requests and responses use `application/json` content type.
-3. **Primary Keys**: Most entities use composite keys (PK + SK) for DynamoDB single-table design.
-4. **Users Table Exception**: Uses simple `id` hash key instead of PK/SK composite.
-5. **Cascade Deletes**: Customer deletion automatically removes all related contacts and addresses.
-6. **Query Parameters**: Devices and Regions endpoints support filtering via query parameters.
-7. **Nested Data**: GET /customers/{id} returns nested contacts[] and addresses[] arrays.
+1. **Authentication**: Currently in DEV_MODE - authentication bypassed with mock admin user. Production will require Firebase authentication tokens.
+2. **RBAC System**: ✅ Fully implemented with 69 permissions, 10 roles, 132 assignments, and 10 UI components seeded (Feb 9, 2026).
+3. **Data Format**: All requests and responses use `application/json` content type.
+4. **Primary Keys**: Most entities use composite keys (PK + SK) for DynamoDB single-table design.
+5. **Users Table Exception**: Uses simple `id` hash key instead of PK/SK composite.
+6. **Cascade Deletes**: Customer deletion automatically removes all related contacts and addresses.
+7. **Query Parameters**: Devices and Regions endpoints support filtering via query parameters.
+8. **Nested Data**: GET /customers/{id} returns nested contacts[] and addresses[] arrays.
+9. **Encryption**: All sensitive fields encrypted at rest. Use `?decrypt=false` for inter-service communication.
+10. **Path Normalization**: Lambda automatically strips `/dev` stage prefix and `/users` base path from API Gateway v2 routes.
+11. **Permission Format**: All permissions follow `resource:action` naming convention (e.g., `device:read`, `user:manage`).
+12. **Role Levels**: Range from 0-100, with higher levels indicating more access (admin=100, viewer=10).
+13. **Lambda Version**: v_users_api deployed at version 20260209031653 with full RBAC support.

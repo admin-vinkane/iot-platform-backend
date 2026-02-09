@@ -1,3 +1,6 @@
 boto3
 pydantic==2.5.3
 pydantic-core==2.14.6
+email-validator
+# Optional: Install for production Firebase authentication
+# firebase-admin>=6.0.0

@@ -559,16 +559,17 @@ def lambda_handler(event, context):
             if body.get("Status") not in ["active", "inactive"]:
                 return ErrorResponse.build("Status must be 'active' or 'inactive'", 400)
             
-            # Validate optional CustomerId if provided (skip if permission issues)
-            if body.get("CustomerId"):
+            # Validate optional customerId if provided (skip if permission issues)
+            customer_id = body.get("customerId")
+            if customer_id:
                 try:
-                    is_valid, error_msg, is_permission_error = validate_customer_id_exists(body.get("CustomerId"))
+                    is_valid, error_msg, is_permission_error = validate_customer_id_exists(customer_id)
                     # Only return error if it's a real validation failure (not a permission issue)
                     if is_valid is False and not is_permission_error:
                         return ErrorResponse.build(error_msg, 400)
                     # If permission error, just log and continue
                     if is_permission_error:
-                        logger.info(f"Customer validation permission issue for {body.get('CustomerId')}, allowing anyway")
+                        logger.info(f"Customer validation permission issue for {customer_id}, allowing anyway")
                 except Exception as e:
                     logger.warning(f"Customer validation skipped: {str(e)}")
             
@@ -640,8 +641,9 @@ def lambda_handler(event, context):
                 }
                 
                 # Add optional fields
-                if body.get("CustomerId"):
-                    installation_item["CustomerId"] = body.get("CustomerId")
+                customer_id = body.get("customerId")
+                if customer_id:
+                    installation_item["customerId"] = customer_id
                 if body.get("TemplateId"):
                     installation_item["TemplateId"] = body.get("TemplateId")
                 
@@ -1302,12 +1304,12 @@ def lambda_handler(event, context):
             reason = body.get("reason")
             ip_address = get_client_ip(event)
             
-            # Validate install exists and get CustomerId
+            # Validate install exists and get customerId
             is_valid, error_msg = validate_install_exists(install_id)
             if not is_valid:
                 return ErrorResponse.build(error_msg, 404)
             
-            # Get installation to retrieve CustomerId
+            # Get installation to retrieve customerId
             try:
                 install_response = table.get_item(
                     Key={"PK": f"INSTALL#{install_id}", "SK": "META"}
@@ -1315,9 +1317,9 @@ def lambda_handler(event, context):
                 if "Item" not in install_response:
                     return ErrorResponse.build(f"Installation {install_id} not found", 404)
                 
-                customer_id = install_response["Item"].get("CustomerId")
+                customer_id = install_response["Item"].get("customerId") or install_response["Item"].get("CustomerId")
                 if not customer_id:
-                    return ErrorResponse.build(f"Installation {install_id} does not have a CustomerId. Cannot link contacts.", 400)
+                    return ErrorResponse.build(f"Installation {install_id} does not have a customerId. Cannot link contacts.", 400)
             except Exception as e:
                 logger.error(f"Error fetching installation: {str(e)}")
                 return ErrorResponse.build(f"Error fetching installation: {str(e)}", 500)
@@ -1747,7 +1749,7 @@ def lambda_handler(event, context):
 
                 # If includeCustomer is requested, fetch customer details
                 if include_customer:
-                    customer_id = install_data.get("CustomerId")
+                    customer_id = install_data.get("customerId") or install_data.get("CustomerId")
                     if customer_id:
                         try:
                             customers_table = dynamodb.Table(os.environ.get("CUSTOMERS_TABLE", "v_customers_dev"))
@@ -1915,6 +1917,12 @@ def lambda_handler(event, context):
                 # Decrypt sensitive fields before returning
                 install_data = prepare_item_for_response(install_data, "INSTALLATION", decrypt=True)
 
+                # Normalize CustomerId to customerId for consistent response
+                if "CustomerId" in install_data and "customerId" not in install_data:
+                    install_data["customerId"] = install_data.pop("CustomerId")
+                elif "CustomerId" in install_data:
+                    install_data.pop("CustomerId")
+
                 return SuccessResponse.build(install_data)
 
             except ClientError as e:
@@ -1984,7 +1992,7 @@ def lambda_handler(event, context):
                             
                             # If includeCustomer is requested, fetch customer details
                             if include_customer:
-                                customer_id = install_data.get("CustomerId")
+                                customer_id = install_data.get("customerId") or install_data.get("CustomerId")
                                 if customer_id:
                                     # Query customer from v_customers table
                                     try:
