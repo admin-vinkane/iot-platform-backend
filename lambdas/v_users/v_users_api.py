@@ -1680,12 +1680,12 @@ def handle_list_users(query_parameters: Dict[str, Any], authenticated_user: Opti
     
     try:
         # Parse pagination
-        limit = min(int(query_parameters.get("limit", DEFAULT_PAGE_LIMIT)), MAX_PAGE_LIMIT)
+        requested_limit = min(int(query_parameters.get("limit", DEFAULT_PAGE_LIMIT)), MAX_PAGE_LIMIT)
         last_key = query_parameters.get("lastEvaluatedKey")
         
         # Build filter expression
-        filter_expressions = []
-        expression_values = {}
+        filter_expressions = ["entityType = :entityType", "SK = :sk"]
+        expression_values = {":entityType": ENTITY_TYPE_USER, ":sk": "ENTITY#USER"}
         expression_names = {}
         
         # Role filter
@@ -1710,34 +1710,72 @@ def handle_list_users(query_parameters: Dict[str, Any], authenticated_user: Opti
                 filter_expressions.append(f"{region_field} = :{region_field}")
                 expression_values[f":{region_field}"] = query_parameters[region_field]
         
-        # Build scan parameters
-        scan_params = {"Limit": limit}
-        
-        if filter_expressions:
-            scan_params["FilterExpression"] = " AND ".join(filter_expressions)
-            scan_params["ExpressionAttributeValues"] = expression_values
-            if expression_names:
-                scan_params["ExpressionAttributeNames"] = expression_names
+        # Keep scanning until we get enough USER entities or run out of items
+        collected_items = []
+        scan_last_key = None
         
         if last_key:
             try:
-                scan_params["ExclusiveStartKey"] = json.loads(last_key)
+                scan_last_key = json.loads(last_key)
             except:
                 return ErrorResponse.build("Invalid lastEvaluatedKey", 400)
         
-        # Execute scan
-        response = table.scan(**scan_params)
-        items = response.get("Items", [])
+        # Scan with larger internal limit to account for filtered items
+        # Multiply requested limit by 20 to increase chances of getting enough users
+        max_scans = 5  # Prevent infinite loops
+        scan_count = 0
         
-        # Apply search filter (post-scan since DynamoDB doesn't support contains well)
-        if "search" in query_parameters:
-            search_term = query_parameters["search"].lower()
-            items = [
-                item for item in items
-                if search_term in item.get("firstName", "").lower() or
-                   search_term in item.get("lastName", "").lower() or
-                   search_term in item.get("email", "").lower()
-            ]
+        while len(collected_items) < requested_limit and scan_count < max_scans:
+            # Build scan parameters with larger limit
+            scan_params = {
+                "Limit": requested_limit * 20,  # Scan more items to find enough USER entities
+                "FilterExpression": " AND ".join(filter_expressions),
+                "ExpressionAttributeValues": expression_values
+            }
+            
+            if expression_names:
+                scan_params["ExpressionAttributeNames"] = expression_names
+            
+            if scan_last_key:
+                scan_params["ExclusiveStartKey"] = scan_last_key
+            
+            # Execute scan
+            response = table.scan(**scan_params)
+            items = response.get("Items", [])
+            
+            # Apply search filter (post-scan since DynamoDB doesn't support contains well)
+            if "search" in query_parameters:
+                search_term = query_parameters["search"].lower()
+                items = [
+                    item for item in items
+                    if search_term in item.get("firstName", "").lower() or
+                       search_term in item.get("lastName", "").lower() or
+                       search_term in item.get("email", "").lower()
+                ]
+            
+            # Add items to collection
+            collected_items.extend(items)
+            
+            # Check if there are more items to scan
+            if "LastEvaluatedKey" in response:
+                scan_last_key = response["LastEvaluatedKey"]
+                scan_count += 1
+            else:
+                # No more items in table
+                scan_last_key = None
+                break
+            
+            # If we have enough items, stop scanning
+            if len(collected_items) >= requested_limit:
+                break
+        
+        # Trim to requested limit
+        items = collected_items[:requested_limit]
+        has_more = len(collected_items) > requested_limit or scan_last_key is not None
+        
+        # Trim to requested limit
+        items = collected_items[:requested_limit]
+        has_more = len(collected_items) > requested_limit or scan_last_key is not None
         
         # Process items
         items = [simplify(prepare_item_for_response(item, ENTITY_TYPE_USER, decrypt=should_decrypt)) for item in items]
@@ -1753,12 +1791,12 @@ def handle_list_users(query_parameters: Dict[str, Any], authenticated_user: Opti
             "users": cleaned_items,
             "count": len(cleaned_items),
             "pagination": {
-                "limit": limit
+                "limit": requested_limit
             }
         }
         
-        if "LastEvaluatedKey" in response:
-            result["pagination"]["lastEvaluatedKey"] = json.dumps(response["LastEvaluatedKey"])
+        if scan_last_key:
+            result["pagination"]["lastEvaluatedKey"] = json.dumps(scan_last_key)
             result["pagination"]["hasMore"] = True
         else:
             result["pagination"]["hasMore"] = False

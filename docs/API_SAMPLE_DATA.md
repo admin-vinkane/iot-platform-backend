@@ -2310,13 +2310,54 @@ curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/cust
 
 ## 3. USERS API
 
+**Lambda:** v_users_api (version 20260209031653)
+
+**Authentication:** DEV_MODE enabled - bypasses authentication with mock admin user
+
+**Table:** v_users_dev (DynamoDB)
+
 **Audit Trail Fields:** All user records automatically track:
 - `createdAt` / `updatedAt` - ISO 8601 timestamps with Z suffix
-- `createdBy` / `updatedBy` - User identity (email) who created/last modified the record
-- POST operations set all four fields; PUT operations update only updatedAt and updatedBy
+- `createdBy` / `updatedBy` - User identity (email or uid) who created/last modified the record
+- POST operations set all four fields; PUT/PATCH operations update only updatedAt and updatedBy
+
+**User Roles:**
+- `admin` - Administrator
+- `manager` - Manager
+- `operator` - Operator
+- `viewer` - Viewer
+- `field_technician` - Field Technician
+
+### User Schema
+
+**Core User Fields:**
+- `id` - Unique user identifier (email)
+- `PK` - Partition key: `USER#{userId}`
+- `SK` - Sort key: `ENTITY#USER`
+- `entityType` - Always "USER"
+- `firebaseUid` - Firebase authentication UID (populated on first login)
+- `email` - Email address (validated)
+- `firstName` - First name (1-100 chars)
+- `lastName` - Last name (1-100 chars)
+- `role` - User role enum
+- `phoneNumber` - Optional phone number (E.164 format)
+- `isActive` - User active status (default: true)
+- `emailVerified` - Email verification status (default: false)
+- `lastLoginAt` - Last login timestamp
+- `loginCount` - Number of logins (default: 0)
+- `permissions` - Array of permission strings (legacy, now uses RBAC)
+
+**Regional Assignment Fields:**
+- `stateId` - State assignment
+- `districtId` - District assignment
+- `mandalId` - Mandal assignment
+- `villageId` - Village assignment
 
 ### GET /users
 **Description:** List all users  
+**Query Parameters:**
+- `decrypt` - Set to `false` for encrypted data (default: true)
+
 **Request:**
 ```bash
 curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users
@@ -2326,112 +2367,427 @@ curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users
 ```json
 [
   {
-    "id": "user-1",
-    "PK": "USER#user-1",
+    "id": "admin@vinkane.com",
+    "PK": "USER#admin@vinkane.com",
     "SK": "ENTITY#USER",
     "entityType": "USER",
-    "keycloakId": "kc-uuid-1",
+    "firebaseUid": "firebase-uid-abc123",
     "email": "admin@vinkane.com",
     "firstName": "Super",
     "lastName": "Admin",
-    "name": "Super Admin",
-    "role": "Administrator",
+    "role": "admin",
+    "phoneNumber": "+919876543210",
     "isActive": true,
     "emailVerified": true,
+    "lastLoginAt": "2026-02-08T15:30:00Z",
+    "loginCount": 42,
+    "permissions": [],
+    "stateId": null,
+    "districtId": null,
+    "mandalId": null,
+    "villageId": null,
     "createdAt": "2024-01-10T10:00:00Z",
-    "updatedAt": "2024-01-10T10:00:00Z",
+    "updatedAt": "2026-02-08T15:30:00Z",
     "createdBy": "system",
-    "updatedBy": "system"
+    "updatedBy": "admin@vinkane.com"
+  },
+  {
+    "id": "nagendrantn@gmail.com",
+    "email": "nagendrantn@gmail.com",
+    "firstName": "Nagendra",
+    "lastName": "TN",
+    "role": "operator",
+    "isActive": true,
+    "emailVerified": true,
+    "createdAt": "2024-06-15T08:00:00Z",
+    "updatedAt": "2024-06-15T08:00:00Z"
   }
 ]
 ```
 
 ### GET /users/{userId}
-**Description:** Get single user by ID  
+**Description:** Get single user by ID (email)  
 **Request:**
 ```bash
-curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/user-1
+curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/admin@vinkane.com
 ```
 
 **Response (200):**
 ```json
 {
-  "id": "user-1",
+  "id": "admin@vinkane.com",
+  "PK": "USER#admin@vinkane.com",
+  "SK": "ENTITY#USER",
+  "entityType": "USER",
+  "firebaseUid": "firebase-uid-abc123",
   "email": "admin@vinkane.com",
   "firstName": "Super",
   "lastName": "Admin",
-  "name": "Super Admin",
-  "role": "Administrator",
-  "isActive": true
+  "role": "admin",
+  "phoneNumber": "+919876543210",
+  "isActive": true,
+  "emailVerified": true,
+  "lastLoginAt": "2026-02-08T15:30:00Z",
+  "loginCount": 42,
+  "permissions": [],
+  "stateId": null,
+  "districtId": null,
+  "mandalId": null,
+  "villageId": null,
+  "createdAt": "2024-01-10T10:00:00Z",
+  "updatedAt": "2026-02-08T15:30:00Z",
+  "createdBy": "system",
+  "updatedBy": "admin@vinkane.com"
 }
 ```
 
 ### POST /users
 **Description:** Create new user  
+**Required Fields:** id, email, firstName, lastName, role  
 **Request:**
 ```bash
 curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users \
   -H "Content-Type: application/json" \
   -d '{
-    "id": "user-999",
-    "PK": "USER#user-999",
-    "SK": "ENTITY#USER",
-    "entityType": "USER",
-    "keycloakId": "kc-uuid-999",
+    "id": "newuser@vinkane.com",
     "email": "newuser@vinkane.com",
     "firstName": "New",
     "lastName": "User",
-    "name": "New User",
-    "role": "Operator",
+    "role": "operator",
+    "phoneNumber": "+919876543211",
     "isActive": true,
     "emailVerified": false,
-    "createdAt": "2026-01-16T10:00:00Z",
-    "updatedAt": "2026-01-16T10:00:00Z",
-    "createdBy": "admin@vinkane.com"
+    "stateId": "AP",
+    "districtId": "DIST001"
   }'
 ```
 
-**Response (200):**
+**Response (201):**
 ```json
 {
-  "message": "User created successfully"
+  "message": "User created successfully",
+  "user": {
+    "id": "newuser@vinkane.com",
+    "email": "newuser@vinkane.com",
+    "firstName": "New",
+    "lastName": "User",
+    "role": "operator",
+    "phoneNumber": "+919876543211",
+    "isActive": true,
+    "emailVerified": false,
+    "stateId": "AP",
+    "districtId": "DIST001",
+    "createdAt": "2026-02-09T03:20:00.123456Z",
+    "updatedAt": "2026-02-09T03:20:00.123456Z",
+    "createdBy": "dev-admin-uid"
+  }
 }
 ```
 
 ### PUT /users/{userId}
-**Description:** Update user  
+**Description:** Full update of user (replaces all fields)  
 **Request:**
 ```bash
-curl -X PUT https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/user-999 \
+curl -X PUT https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/newuser@vinkane.com \
   -H "Content-Type: application/json" \
   -d '{
-    "id": "user-999",
-    "PK": "USER#user-999",
-    "SK": "ENTITY#USER",
     "firstName": "Updated",
     "lastName": "User",
-    "role": "Manager"
+    "role": "manager",
+    "phoneNumber": "+919876543299",
+    "isActive": true
   }'
 ```
 
 **Response (200):**
 ```json
 {
-  "message": "User updated successfully"
+  "message": "User updated successfully",
+  "user": {
+    "id": "newuser@vinkane.com",
+    "email": "newuser@vinkane.com",
+    "firstName": "Updated",
+    "lastName": "User",
+    "role": "manager",
+    "phoneNumber": "+919876543299",
+    "isActive": true,
+    "updatedAt": "2026-02-09T03:25:00.123456Z",
+    "updatedBy": "dev-admin-uid"
+  }
+}
+```
+
+### PATCH /users/{userId}
+**Description:** Partial update of user (updates only provided fields)  
+**Allowed Fields:** firstName, lastName, role, phoneNumber, isActive, stateId, districtId, mandalId, villageId  
+**Request:**
+```bash
+curl -X PATCH https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/newuser@vinkane.com \
+  -H "Content-Type: application/json" \
+  -d '{
+    "role": "viewer",
+    "isActive": false
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "message": "User updated successfully",
+  "updatedFields": ["role", "isActive"],
+  "user": {
+    "id": "newuser@vinkane.com",
+    "role": "viewer",
+    "isActive": false,
+    "updatedAt": "2026-02-09T03:30:00.123456Z"
+  }
 }
 ```
 
 ### DELETE /users/{userId}
-**Description:** Delete user  
+**Description:** Delete user (soft delete - sets isActive to false)  
 **Request:**
 ```bash
-curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/user-999
+curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/newuser@vinkane.com
 ```
 
 **Response (200):**
 ```json
 {
   "message": "User deleted successfully"
+}
+```
+
+### POST /users/sync
+**Description:** Sync user from Firebase authentication (creates or updates user on first login)  
+**Request:**
+```bash
+curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "firebaseUid": "firebase-uid-xyz789",
+    "email": "firebase-user@example.com",
+    "firstName": "Firebase",
+    "lastName": "User",
+    "emailVerified": true
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "message": "User synced successfully",
+  "user": {
+    "id": "firebase-user@example.com",
+    "firebaseUid": "firebase-uid-xyz789",
+    "email": "firebase-user@example.com",
+    "firstName": "Firebase",
+    "lastName": "User",
+    "emailVerified": true,
+    "lastLoginAt": "2026-02-09T03:35:00.123456Z",
+    "loginCount": 1,
+    "createdAt": "2026-02-09T03:35:00.123456Z"
+  }
+}
+```
+
+---
+
+### 3.0.1. User Profile API
+
+**Description:** Extended user profile with personal information, preferences, and profile picture
+
+**Profile Schema:**
+- `PK` - `USER#{userId}`
+- `SK` - `PROFILE#MAIN`
+- `userId` - User ID reference
+- `firstName`, `lastName` - User name
+- `phoneNumber` - Contact number
+- `language` - UI language (2-letter code, default: "en")
+- `organization` - Organization name
+- `department` - Department name
+- `timezone` - User timezone (default: "UTC")
+- `profilePictureUrl` - S3 URL for profile picture
+- `address` - Address object (street, city, state, country, postalCode)
+- `preferences` - Preferences object (notifications, emailAlerts, smsAlerts)
+
+#### GET /users/{userId}/profile
+**Description:** Get user profile (creates default if doesn't exist)  
+**Request:**
+```bash
+curl -X GET https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/admin@vinkane.com/profile
+```
+
+**Response (200):**
+```json
+{
+  "userId": "admin@vinkane.com",
+  "firstName": "Super",
+  "lastName": "Admin",
+  "phoneNumber": "+919876543210",
+  "language": "en",
+  "organization": "Vinkane Technologies",
+  "department": "Engineering",
+  "timezone": "Asia/Kolkata",
+  "profilePictureUrl": "https://iot-platform-profile-pictures.s3.amazonaws.com/profile-pictures/admin@vinkane.com/20260208150000.jpg",
+  "address": {
+    "street": "123 Tech Park",
+    "city": "Bangalore",
+    "state": "Karnataka",
+    "country": "India",
+    "postalCode": "560001"
+  },
+  "preferences": {
+    "notifications": true,
+    "emailAlerts": true,
+    "smsAlerts": false
+  },
+  "createdAt": "2024-01-10T10:00:00Z",
+  "updatedAt": "2026-02-08T15:00:00Z"
+}
+```
+
+#### PUT /users/{userId}/profile
+**Description:** Full update of user profile  
+**Request:**
+```bash
+curl -X PUT https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/admin@vinkane.com/profile \
+  -H "Content-Type: application/json" \
+  -d '{
+    "firstName": "Super",
+    "lastName": "Admin",
+    "phoneNumber": "+919876543210",
+    "language": "en",
+    "organization": "Vinkane Technologies",
+    "department": "Engineering",
+    "timezone": "Asia/Kolkata",
+    "address": {
+      "street": "456 New Address",
+      "city": "Bangalore",
+      "state": "Karnataka",
+      "country": "India",
+      "postalCode": "560002"
+    },
+    "preferences": {
+      "notifications": true,
+      "emailAlerts": false,
+      "smsAlerts": true
+    }
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "message": "Profile updated successfully",
+  "profile": {
+    "userId": "admin@vinkane.com",
+    "firstName": "Super",
+    "lastName": "Admin",
+    "address": {
+      "street": "456 New Address",
+      "city": "Bangalore",
+      "state": "Karnataka",
+      "country": "India",
+      "postalCode": "560002"
+    },
+    "preferences": {
+      "notifications": true,
+      "emailAlerts": false,
+      "smsAlerts": true
+    },
+    "updatedAt": "2026-02-09T03:40:00Z"
+  }
+}
+```
+
+#### PATCH /users/{userId}/profile
+**Description:** Partial update of user profile (updates only provided fields)  
+**Request:**
+```bash
+curl -X PATCH https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/admin@vinkane.com/profile \
+  -H "Content-Type: application/json" \
+  -d '{
+    "timezone": "Asia/Dubai",
+    "preferences": {
+      "smsAlerts": true
+    }
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "message": "Profile updated successfully",
+  "profile": {
+    "timezone": "Asia/Dubai",
+    "preferences": {
+      "notifications": true,
+      "emailAlerts": false,
+      "smsAlerts": true
+    },
+    "updatedAt": "2026-02-09T03:45:00Z"
+  },
+  "updatedFields": ["timezone", "preferences"]
+}
+```
+
+#### POST /users/{userId}/profile/picture
+**Description:** Upload profile picture (base64 encoded image)  
+**Supported Formats:** JPEG, JPG, PNG, WebP  
+**Max Size:** 5MB  
+**Request:**
+```bash
+curl -X POST https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/admin@vinkane.com/profile/picture \
+  -H "Content-Type: application/json" \
+  -d '{
+    "imageData": "data:image/jpeg;base64,/9j/4AAQSkZJRg...",
+    "contentType": "image/jpeg",
+    "fileExtension": "jpg"
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "message": "Profile picture uploaded successfully",
+  "profilePictureUrl": "https://iot-platform-profile-pictures.s3.amazonaws.com/profile-pictures/admin@vinkane.com/20260209034500.jpg",
+  "s3Key": "profile-pictures/admin@vinkane.com/20260209034500.jpg"
+}
+```
+
+#### GET /users/{userId}/profile/picture/upload-url
+**Description:** Get presigned S3 URL for direct image upload (client-side upload)  
+**Query Parameters:**
+- `contentType` - Image MIME type (default: "image/jpeg")
+- `fileExtension` - File extension (default: "jpg")
+
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/admin@vinkane.com/profile/picture/upload-url?contentType=image/png&fileExtension=png"
+```
+
+**Response (200):**
+```json
+{
+  "uploadUrl": "https://iot-platform-profile-pictures.s3.amazonaws.com/",
+  "fields": {
+    "key": "profile-pictures/admin@vinkane.com/20260209034600.png",
+    "Content-Type": "image/png",
+    "x-amz-meta-userId": "admin@vinkane.com",
+    "policy": "eyJleHBpcmF0aW9uIjogI...",
+    "x-amz-algorithm": "AWS4-HMAC-SHA256",
+    "x-amz-credential": "...",
+    "x-amz-date": "20260209T034600Z",
+    "x-amz-signature": "..."
+  },
+  "profilePictureUrl": "https://iot-platform-profile-pictures.s3.amazonaws.com/profile-pictures/admin@vinkane.com/20260209034600.png",
+  "s3Key": "profile-pictures/admin@vinkane.com/20260209034600.png",
+  "expiresIn": 3600,
+  "instructions": {
+    "method": "POST",
+    "description": "Use the uploadUrl and include all fields in the form data along with the file"
+  }
 }
 ```
 
