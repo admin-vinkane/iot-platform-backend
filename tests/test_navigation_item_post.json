@@ -1,0 +1,11 @@
+{
+  "httpMethod": "POST",
+  "path": "/navigation/groups/{groupId}/items",
+  "pathParameters": {
+    "groupId": "GROUP_20260210120000_abc12345"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"label\":\"Menu Management\",\"icon\":\"Grid\",\"path\":\"/menu-management\",\"permission\":\"can_manage_navigation\",\"isActive\":true,\"order\":1,\"createdBy\":\"admin@example.com\",\"updatedBy\":\"admin@example.com\"}"
+}

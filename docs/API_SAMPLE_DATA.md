@@ -2,9 +2,29 @@
 
 Base URL: `https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev`
 
+**Latest Update (Feb 10, 2026):** Navigation API deployed with 11 endpoints for complete menu management, audit trail, and hierarchical structure support. See [Navigation API](#7-navigation-api) section.
+
 ---
 
-## 🔐 Encryption & Decryption
+## � Table of Contents
+
+1. [Devices API](#1-devices-api)
+2. [Customers API](#2-customers-api)
+3. [Users API](#3-users-api)
+   - [RBAC (Role-Based Access Control) API](#31-rbac-role-based-access-control-api)
+4. [Regions API](#4-regions-api)
+5. [SIM Cards API](#5-simcards-api)
+6. [Surveys API (Field Survey)](#6-surveys-api-field-survey)
+7. [Navigation API](#7-navigation-api) 🆕
+8. [Installs API](#3-installs-api)
+9. [Install-Device Linking API](#4-install-device-linking-api)
+10. [Install-Contact Linking API](#5-install-contact-linking-api)
+11. [Device-SIM Linking API](#6-device-sim-linking-api)
+12. [Audit Trail & Change Tracking](#4-audit-trail--change-tracking)
+
+---
+
+## �🔐 Encryption & Decryption
 
 **All sensitive data is decrypted by default.** Use the `?decrypt=false` query parameter to get encrypted data.
 
@@ -2917,6 +2937,74 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 }
 ```
 
+#### PUT /users/permissions/{permissionName}
+**Description:** Update an existing permission (can update displayName, description, category only)  
+**Note:** `permissionName`, `resource`, and `action` are immutable and cannot be changed  
+**Request:**
+```bash
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/device:read" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "displayName": "View Device Details",
+    "description": "View comprehensive device information and status",
+    "category": "Device Operations"
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "message": "Permission updated successfully",
+  "data": {
+    "permissionName": "device:read",
+    "displayName": "View Device Details",
+    "description": "View comprehensive device information and status",
+    "resource": "device",
+    "action": "read",
+    "category": "Device Operations",
+    "createdAt": "2026-02-09T03:11:21.027760",
+    "updatedAt": "2026-02-09T13:45:30.123456",
+    "createdBy": "dev-admin-uid",
+    "updatedBy": "admin@vinkane.com"
+  }
+}
+```
+
+**Error Response (400):**
+```json
+{
+  "error": "No valid fields to update"
+}
+```
+
+#### DELETE /users/permissions/{permissionName}
+**Description:** Delete a permission (with safety check for role assignments)  
+**Request:**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/device:test"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Permission 'device:test' deleted successfully"
+}
+```
+
+**Error Response (409) - Permission in use:**
+```json
+{
+  "error": "Cannot delete permission 'device:read'. It is assigned to roles: admin, device_manager, operator. Remove assignments first."
+}
+```
+
+**Error Response (404) - Not found:**
+```json
+{
+  "error": "Permission 'device:test' not found"
+}
+```
+
 ---
 
 ### 3.1.2. Roles API
@@ -3386,6 +3474,112 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
   "meta": {
     "count": 10
   }
+}
+```
+
+#### GET /users/permissions/components/{componentName}
+**Description:** Get a specific UI component by name  
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/components/DashboardPage"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Component retrieved successfully",
+  "data": {
+    "componentName": "DashboardPage",
+    "path": "/dashboard",
+    "icon": "dashboard",
+    "order": 1,
+    "category": "Dashboard",
+    "requiredPermissions": ["dashboard:read"],
+    "optionalPermissions": ["device:control"],
+    "createdAt": "2026-02-09T03:12:10.427425",
+    "updatedAt": "2026-02-09T03:12:10.427425",
+    "createdBy": "dev-admin-uid"
+  }
+}
+```
+
+**Error Response (404):**
+```json
+{
+  "error": "Component 'UnknownPage' not found"
+}
+```
+
+#### PUT /users/permissions/components/{componentName}
+**Description:** Update an existing UI component  
+**Updatable Fields:** path, icon, order, category, requiredPermissions, optionalPermissions  
+**Note:** `componentName` is immutable and cannot be changed  
+**Request:**
+```bash
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/components/DashboardPage" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "/home",
+    "icon": "home",
+    "order": 0,
+    "category": "Overview",
+    "requiredPermissions": ["dashboard:read"],
+    "optionalPermissions": ["device:control", "device:read"]
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "message": "Component updated successfully",
+  "data": {
+    "componentName": "DashboardPage",
+    "path": "/home",
+    "icon": "home",
+    "order": 0,
+    "category": "Overview",
+    "requiredPermissions": ["dashboard:read"],
+    "optionalPermissions": ["device:control", "device:read"],
+    "createdAt": "2026-02-09T03:12:10.427425",
+    "updatedAt": "2026-02-09T13:50:15.123456",
+    "createdBy": "dev-admin-uid",
+    "updatedBy": "admin@vinkane.com"
+  }
+}
+```
+
+**Error Response (400):**
+```json
+{
+  "error": "No valid fields to update"
+}
+```
+
+**Error Response (404):**
+```json
+{
+  "error": "Component 'UnknownPage' not found"
+}
+```
+
+#### DELETE /users/permissions/components/{componentName}
+**Description:** Delete a UI component  
+**Request:**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/components/TestComponent"
+```
+
+**Response (200):**
+```json
+{
+  "message": "Component 'TestComponent' deleted successfully"
+}
+```
+
+**Error Response (404):**
+```json
+{
+  "error": "Component 'TestComponent' not found"
 }
 ```
 
@@ -4264,6 +4458,568 @@ curl -X DELETE https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/surve
   "error": "Cannot delete submitted survey"
 }
 ```
+
+---
+
+## 7. NAVIGATION API
+
+**Lambda:** `v_navigation_api`  
+**Deployed:** 2026-02-10  
+**Version:** 20260210180859  
+**DynamoDB Table:** `v_navigation_dev`
+
+### Overview
+Complete menu and navigation management system with audit trail. Supports hierarchical structure with groups containing items, full CRUD operations, reordering, moving items between groups, and comprehensive change history.
+
+### Entity Types
+- `NAVIGATION_GROUP` - Navigation menu groups
+- `NAVIGATION_ITEM` - Individual menu items within groups
+- `NAVIGATION_HISTORY` - Audit trail of all changes
+
+### Validation Rules
+- **Group label**: 2-50 characters, unique (case-insensitive)
+- **Group order**: 1-100, unique among groups
+- **Item label**: 2-50 characters, unique within group (case-insensitive)
+- **Item path**: Must start with '/', no spaces, unique across all items
+- **Item order**: 1-100, unique within group
+- **Permission**: Optional (empty string = no permission required)
+
+---
+
+### GET /navigation/groups
+**Description:** List all navigation groups with nested items (sorted by order)
+
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/navigation/groups"
+```
+
+**Response (200):**
+```json
+[
+  {
+    "id": "GROUP_20260210120000_abc12345",
+    "PK": "GROUP#GROUP_20260210120000_abc12345",
+    "SK": "METADATA#GROUP_20260210120000_abc12345",
+    "entityType": "NAVIGATION_GROUP",
+    "label": "Main Menu",
+    "icon": "Home",
+    "isActive": true,
+    "order": 1,
+    "isCollapsible": true,
+    "defaultExpanded": true,
+    "items": [
+      {
+        "id": "ITEM_20260210120100_xyz67890",
+        "PK": "ITEM#ITEM_20260210120100_xyz67890",
+        "SK": "METADATA#ITEM_20260210120100_xyz67890",
+        "entityType": "NAVIGATION_ITEM",
+        "label": "Dashboard",
+        "icon": "LayoutDashboard",
+        "path": "/dashboard",
+        "permission": "",
+        "isActive": true,
+        "order": 1,
+        "parentId": "GROUP_20260210120000_abc12345",
+        "children": [],
+        "createdAt": "2026-02-10T12:01:00.000Z",
+        "updatedAt": "2026-02-10T12:01:00.000Z",
+        "createdBy": "admin@example.com",
+        "updatedBy": "admin@example.com"
+      },
+      {
+        "id": "ITEM_20260210120200_def45678",
+        "label": "Device Configuration",
+        "icon": "Settings",
+        "path": "/device-config",
+        "permission": "device:manage",
+        "isActive": true,
+        "order": 2,
+        "parentId": "GROUP_20260210120000_abc12345",
+        "children": [],
+        "createdAt": "2026-02-10T12:02:00.000Z",
+        "updatedAt": "2026-02-10T12:02:00.000Z"
+      }
+    ],
+    "createdAt": "2026-02-10T12:00:00.000Z",
+    "updatedAt": "2026-02-10T12:00:00.000Z",
+    "createdBy": "admin@example.com",
+    "updatedBy": "admin@example.com"
+  },
+  {
+    "id": "GROUP_20260210120300_ghi12345",
+    "label": "Administration",
+    "icon": "Shield",
+    "isActive": true,
+    "order": 2,
+    "isCollapsible": true,
+    "defaultExpanded": false,
+    "items": [
+      {
+        "id": "ITEM_20260210120400_jkl67890",
+        "label": "Menu Management",
+        "icon": "Grid",
+        "path": "/menu-management",
+        "permission": "can_manage_navigation",
+        "isActive": true,
+        "order": 1,
+        "parentId": "GROUP_20260210120300_ghi12345",
+        "children": []
+      }
+    ],
+    "createdAt": "2026-02-10T12:03:00.000Z",
+    "updatedAt": "2026-02-10T12:03:00.000Z"
+  }
+]
+```
+
+---
+
+### POST /navigation/groups
+**Description:** Create a new navigation group
+
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/navigation/groups" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "label": "Administration",
+    "icon": "Shield",
+    "isActive": true,
+    "order": 6,
+    "isCollapsible": true,
+    "defaultExpanded": false,
+    "createdBy": "admin@example.com",
+    "updatedBy": "admin@example.com"
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "id": "GROUP_20260210180859_mno12345",
+  "PK": "GROUP#GROUP_20260210180859_mno12345",
+  "SK": "METADATA#GROUP_20260210180859_mno12345",
+  "entityType": "NAVIGATION_GROUP",
+  "label": "Administration",
+  "icon": "Shield",
+  "isActive": true,
+  "order": 6,
+  "isCollapsible": true,
+  "defaultExpanded": false,
+  "items": [],
+  "createdAt": "2026-02-10T18:08:59.123Z",
+  "updatedAt": "2026-02-10T18:08:59.123Z",
+  "createdBy": "admin@example.com",
+  "updatedBy": "admin@example.com"
+}
+```
+
+**Response (400) - Duplicate label:**
+```json
+{
+  "error": "Group label 'Administration' already exists (case-insensitive)"
+}
+```
+
+---
+
+### PATCH /navigation/groups/{groupId}
+**Description:** Update a navigation group (partial update)
+
+**Request:**
+```bash
+curl -X PATCH "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/navigation/groups/GROUP_20260210180859_mno12345" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "label": "Admin Panel",
+    "isActive": false,
+    "updatedBy": "admin@example.com"
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "id": "GROUP_20260210180859_mno12345",
+  "label": "Admin Panel",
+  "icon": "Shield",
+  "isActive": false,
+  "order": 6,
+  "isCollapsible": true,
+  "defaultExpanded": false,
+  "items": [],
+  "createdAt": "2026-02-10T18:08:59.123Z",
+  "updatedAt": "2026-02-10T18:15:30.456Z",
+  "createdBy": "admin@example.com",
+  "updatedBy": "admin@example.com"
+}
+```
+
+---
+
+### DELETE /navigation/groups/{groupId}
+**Description:** Delete a navigation group and all its items (cascade delete)
+
+**Request:**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/navigation/groups/GROUP_20260210180859_mno12345"
+```
+
+**Response (204):**
+```
+No content - successful deletion
+```
+
+**Response (404):**
+```json
+{
+  "error": "Navigation group 'GROUP_20260210180859_mno12345' not found"
+}
+```
+
+---
+
+### POST /navigation/groups/{groupId}/items
+**Description:** Create a new navigation item within a group
+
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/navigation/groups/GROUP_20260210120000_abc12345/items" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "label": "Menu Management",
+    "icon": "Grid",
+    "path": "/menu-management",
+    "permission": "can_manage_navigation",
+    "isActive": true,
+    "order": 2,
+    "createdBy": "admin@example.com",
+    "updatedBy": "admin@example.com"
+  }'
+```
+
+**Response (201):**
+```json
+{
+  "id": "ITEM_20260210181000_pqr67890",
+  "PK": "ITEM#ITEM_20260210181000_pqr67890",
+  "SK": "METADATA#ITEM_20260210181000_pqr67890",
+  "entityType": "NAVIGATION_ITEM",
+  "label": "Menu Management",
+  "icon": "Grid",
+  "path": "/menu-management",
+  "permission": "can_manage_navigation",
+  "isActive": true,
+  "order": 2,
+  "parentId": "GROUP_20260210120000_abc12345",
+  "children": [],
+  "createdAt": "2026-02-10T18:10:00.789Z",
+  "updatedAt": "2026-02-10T18:10:00.789Z",
+  "createdBy": "admin@example.com",
+  "updatedBy": "admin@example.com"
+}
+```
+
+**Response (400) - Duplicate path:**
+```json
+{
+  "error": "Item path '/menu-management' already exists"
+}
+```
+
+**Response (400) - Duplicate label in group:**
+```json
+{
+  "error": "Item label 'Menu Management' already exists in this group"
+}
+```
+
+**Response (404) - Group not found:**
+```json
+{
+  "error": "Navigation group 'GROUP_20260210120000_abc12345' not found"
+}
+```
+
+---
+
+### PATCH /navigation/groups/{groupId}/items/{itemId}
+**Description:** Update a navigation item (partial update)
+
+**Request:**
+```bash
+curl -X PATCH "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/navigation/groups/GROUP_20260210120000_abc12345/items/ITEM_20260210181000_pqr67890" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "label": "Navigation Settings",
+    "icon": "Settings",
+    "isActive": false,
+    "updatedBy": "admin@example.com"
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "id": "ITEM_20260210181000_pqr67890",
+  "label": "Navigation Settings",
+  "icon": "Settings",
+  "path": "/menu-management",
+  "permission": "can_manage_navigation",
+  "isActive": false,
+  "order": 2,
+  "parentId": "GROUP_20260210120000_abc12345",
+  "children": [],
+  "createdAt": "2026-02-10T18:10:00.789Z",
+  "updatedAt": "2026-02-10T18:20:15.234Z",
+  "createdBy": "admin@example.com",
+  "updatedBy": "admin@example.com"
+}
+```
+
+**Response (400) - Item not in group:**
+```json
+{
+  "error": "Item 'ITEM_20260210181000_pqr67890' does not belong to group 'GROUP_20260210120000_abc12345'"
+}
+```
+
+---
+
+### DELETE /navigation/groups/{groupId}/items/{itemId}
+**Description:** Delete a navigation item
+
+**Request:**
+```bash
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/navigation/groups/GROUP_20260210120000_abc12345/items/ITEM_20260210181000_pqr67890"
+```
+
+**Response (204):**
+```
+No content - successful deletion
+```
+
+---
+
+### POST /navigation/groups/reorder
+**Description:** Reorder navigation groups by providing ordered array of group IDs
+
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/navigation/groups/reorder" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "groupIds": [
+      "GROUP_20260210120300_ghi12345",
+      "GROUP_20260210120000_abc12345",
+      "GROUP_20260210180859_mno12345"
+    ]
+  }'
+```
+
+**Response (200):**
+```json
+[
+  {
+    "id": "GROUP_20260210120300_ghi12345",
+    "label": "Administration",
+    "order": 1,
+    "items": [...]
+  },
+  {
+    "id": "GROUP_20260210120000_abc12345",
+    "label": "Main Menu",
+    "order": 2,
+    "items": [...]
+  },
+  {
+    "id": "GROUP_20260210180859_mno12345",
+    "label": "Settings",
+    "order": 3,
+    "items": [...]
+  }
+]
+```
+
+---
+
+### POST /navigation/groups/{groupId}/items/reorder
+**Description:** Reorder items within a group
+
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/navigation/groups/GROUP_20260210120000_abc12345/items/reorder" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "itemIds": [
+      "ITEM_20260210120200_def45678",
+      "ITEM_20260210120100_xyz67890",
+      "ITEM_20260210181000_pqr67890"
+    ]
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "id": "GROUP_20260210120000_abc12345",
+  "label": "Main Menu",
+  "items": [
+    {
+      "id": "ITEM_20260210120200_def45678",
+      "label": "Device Configuration",
+      "order": 1
+    },
+    {
+      "id": "ITEM_20260210120100_xyz67890",
+      "label": "Dashboard",
+      "order": 2
+    },
+    {
+      "id": "ITEM_20260210181000_pqr67890",
+      "label": "Navigation Settings",
+      "order": 3
+    }
+  ]
+}
+```
+
+---
+
+### POST /navigation/items/move
+**Description:** Move an item from one group to another
+
+**Request:**
+```bash
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/navigation/items/move" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "itemId": "ITEM_20260210181000_pqr67890",
+    "fromGroupId": "GROUP_20260210120000_abc12345",
+    "toGroupId": "GROUP_20260210120300_ghi12345"
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "fromGroup": {
+    "id": "GROUP_20260210120000_abc12345",
+    "label": "Main Menu",
+    "items": [
+      {
+        "id": "ITEM_20260210120100_xyz67890",
+        "label": "Dashboard"
+      },
+      {
+        "id": "ITEM_20260210120200_def45678",
+        "label": "Device Configuration"
+      }
+    ]
+  },
+  "toGroup": {
+    "id": "GROUP_20260210120300_ghi12345",
+    "label": "Administration",
+    "items": [
+      {
+        "id": "ITEM_20260210120400_jkl67890",
+        "label": "Menu Management"
+      },
+      {
+        "id": "ITEM_20260210181000_pqr67890",
+        "label": "Navigation Settings"
+      }
+    ]
+  }
+}
+```
+
+**Response (400) - Label conflict:**
+```json
+{
+  "error": "Item label 'Navigation Settings' already exists in target group"
+}
+```
+
+---
+
+### GET /navigation/history
+**Description:** Fetch complete audit trail of all navigation changes
+
+**Request:**
+```bash
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/navigation/history"
+```
+
+**Response (200):**
+```json
+[
+  {
+    "id": "HIST_20260210181500_abc123",
+    "PK": "HISTORY#HIST_20260210181500_abc123",
+    "SK": "TIMESTAMP#2026-02-10T18:15:00.000Z",
+    "entityType": "NAVIGATION_HISTORY",
+    "changeEntityType": "item",
+    "entityId": "ITEM_20260210181000_pqr67890",
+    "changeType": "moved",
+    "fieldName": "parentId",
+    "oldValue": "GROUP_20260210120000_abc12345",
+    "newValue": "GROUP_20260210120300_ghi12345",
+    "description": "Moved item 'Navigation Settings' from group 'GROUP_20260210120000_abc12345' to 'Administration'",
+    "changedBy": "admin@example.com",
+    "changedAt": "2026-02-10T18:15:00.000Z",
+    "ipAddress": "192.168.1.100"
+  },
+  {
+    "id": "HIST_20260210181000_def456",
+    "changeEntityType": "item",
+    "entityId": "ITEM_20260210181000_pqr67890",
+    "changeType": "created",
+    "description": "Created navigation item 'Menu Management' in group 'Main Menu'",
+    "changedBy": "admin@example.com",
+    "changedAt": "2026-02-10T18:10:00.789Z"
+  },
+  {
+    "id": "HIST_20260210180859_ghi789",
+    "changeEntityType": "group",
+    "entityId": "GROUP_20260210180859_mno12345",
+    "changeType": "created",
+    "description": "Created navigation group 'Administration'",
+    "changedBy": "admin@example.com",
+    "changedAt": "2026-02-10T18:08:59.123Z"
+  },
+  {
+    "id": "HIST_20260210181530_jkl012",
+    "changeEntityType": "group",
+    "entityId": "GROUP_20260210180859_mno12345",
+    "changeType": "updated",
+    "fieldName": "label",
+    "oldValue": "Administration",
+    "newValue": "Admin Panel",
+    "description": "Updated group 'Administration' - label",
+    "changedBy": "admin@example.com",
+    "changedAt": "2026-02-10T18:15:30.456Z"
+  },
+  {
+    "id": "HIST_20260210182000_mno345",
+    "changeEntityType": "group",
+    "entityId": "multiple",
+    "changeType": "reordered",
+    "description": "Reordered 3 navigation groups",
+    "changedBy": "admin@example.com",
+    "changedAt": "2026-02-10T18:20:00.000Z"
+  }
+]
+```
+
+### Change Types
+- `created` - Entity was created
+- `updated` - Entity fields were updated
+- `deleted` - Entity was deleted
+- `reordered` - Entities were reordered
+- `moved` - Item was moved between groups
+- `status_changed` - Active status changed
 
 ---
 
@@ -5489,4 +6245,13 @@ Access-Control-Expose-Headers: content-length,content-type
 10. **Path Normalization**: Lambda automatically strips `/dev` stage prefix and `/users` base path from API Gateway v2 routes.
 11. **Permission Format**: All permissions follow `resource:action` naming convention (e.g., `device:read`, `user:manage`).
 12. **Role Levels**: Range from 0-100, with higher levels indicating more access (admin=100, viewer=10).
-13. **Lambda Version**: v_users_api deployed at version 20260209031653 with full RBAC support.
+13. **Lambda Version**: v_users_api deployed at version 20260209122945 with full RBAC CRUD operations.
+14. **Permissions CRUD**: Complete CRUD operations available - POST (create), GET (list/single), PUT (update), DELETE (with safety checks).
+15. **Components CRUD**: Complete CRUD operations available - POST (create), GET (list/single), PUT (update), DELETE.
+16. **Entity Type Filtering**: GET /users endpoint now properly filters by entityType=USER to return only user records (not permissions, roles, etc.).
+17. **Pagination Enhancement**: GET /users limit parameter now controls actual USER entities returned, not items scanned (Feb 9, 2026 update).
+18. **Navigation API**: ✅ Fully deployed v_navigation_api (Feb 10, 2026) with 11 endpoints for complete menu management, audit trail, validation, and hierarchical structure support.
+19. **Navigation Validation**: All navigation entities enforce uniqueness constraints - group labels (case-insensitive), item paths (globally unique), and item labels (unique within group).
+20. **Navigation History**: Immutable audit trail captures all changes with before/after values, supports 6 change types (created, updated, deleted, reordered, moved, status_changed).
+21. **Lambda Versions**: v_users_api=20260209122945, v_navigation_api=20260210180859
+

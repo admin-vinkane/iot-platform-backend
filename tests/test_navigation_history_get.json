@@ -1,0 +1,7 @@
+{
+  "httpMethod": "GET",
+  "path": "/navigation/history",
+  "headers": {
+    "Content-Type": "application/json"
+  }
+}

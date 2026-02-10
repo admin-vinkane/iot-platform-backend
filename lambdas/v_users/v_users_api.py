@@ -1097,6 +1097,119 @@ def handle_list_permissions(authenticated_user: dict):
         return ErrorResponse.build(f"Failed to list permissions: {str(e)}", 500)
 
 
+def handle_update_permission(permission_name: str, event: dict, authenticated_user: dict):
+    """Update an existing permission"""
+    if not check_permission(authenticated_user, "permission:manage"):
+        return ErrorResponse.build("Insufficient permissions", 403)
+    
+    try:
+        pk = f"PERMISSION#{permission_name}"
+        sk = "META"
+        
+        # Check if permission exists
+        response = table.get_item(Key={"PK": pk, "SK": sk})
+        if "Item" not in response:
+            return ErrorResponse.build(f"Permission '{permission_name}' not found", 404)
+        
+        body = json.loads(event.get("body", "{}"))
+        
+        # Build update expression
+        update_expressions = []
+        expression_values = {}
+        expression_names = {}
+        
+        # Updatable fields
+        updatable_fields = {
+            "displayName": "displayName",
+            "description": "description",
+            "category": "category"
+        }
+        
+        for field, attr_name in updatable_fields.items():
+            if field in body:
+                update_expressions.append(f"#{attr_name} = :{attr_name}")
+                expression_values[f":{attr_name}"] = body[field]
+                expression_names[f"#{attr_name}"] = attr_name
+        
+        if not update_expressions:
+            return ErrorResponse.build("No valid fields to update", 400)
+        
+        # Add updatedAt and updatedBy
+        timestamp = datetime.utcnow().isoformat()
+        update_expressions.append("#updatedAt = :updatedAt")
+        update_expressions.append("#updatedBy = :updatedBy")
+        expression_values[":updatedAt"] = timestamp
+        expression_values[":updatedBy"] = authenticated_user["uid"]
+        expression_names["#updatedAt"] = "updatedAt"
+        expression_names["#updatedBy"] = "updatedBy"
+        
+        # Execute update
+        update_expression = "SET " + ", ".join(update_expressions)
+        
+        response = table.update_item(
+            Key={"PK": pk, "SK": sk},
+            UpdateExpression=update_expression,
+            ExpressionAttributeNames=expression_names,
+            ExpressionAttributeValues=expression_values,
+            ReturnValues="ALL_NEW"
+        )
+        
+        updated_item = response["Attributes"]
+        clean_item = simplify({k: v for k, v in updated_item.items() if k not in ["PK", "SK", "entityType"]})
+        
+        return SuccessResponse.build({
+            "message": "Permission updated successfully",
+            "data": clean_item
+        }, 200)
+        
+    except Exception as e:
+        logger.error(f"Error updating permission: {str(e)}")
+        return ErrorResponse.build(f"Failed to update permission: {str(e)}", 500)
+
+
+def handle_delete_permission(permission_name: str, authenticated_user: dict):
+    """Delete a permission"""
+    if not check_permission(authenticated_user, "permission:manage"):
+        return ErrorResponse.build("Insufficient permissions", 403)
+    
+    try:
+        pk = f"PERMISSION#{permission_name}"
+        sk = "META"
+        
+        # Check if permission exists
+        response = table.get_item(Key={"PK": pk, "SK": sk})
+        if "Item" not in response:
+            return ErrorResponse.build(f"Permission '{permission_name}' not found", 404)
+        
+        # Check if permission is assigned to any roles
+        role_perm_check = table.scan(
+            FilterExpression="entityType = :entity_type AND contains(#pk, :perm_name)",
+            ExpressionAttributeValues={
+                ":entity_type": "ROLE_PERMISSION",
+                ":perm_name": permission_name
+            },
+            ExpressionAttributeNames={"#pk": "PK"}
+        )
+        
+        if role_perm_check.get("Items"):
+            assigned_roles = [item["PK"].split("#")[1] for item in role_perm_check["Items"]]
+            return ErrorResponse.build(
+                f"Cannot delete permission '{permission_name}'. It is assigned to roles: {', '.join(assigned_roles)}. Remove assignments first.",
+                409
+            )
+        
+        # Delete the permission
+        table.delete_item(Key={"PK": pk, "SK": sk})
+        
+        return SuccessResponse.build({
+            "message": f"Permission '{permission_name}' deleted successfully"
+        }, 200)
+        
+    except Exception as e:
+        logger.error(f"Error deleting permission: {str(e)}")
+        return ErrorResponse.build(f"Failed to delete permission: {str(e)}", 500)
+
+
 def handle_assign_permission_to_role(role_name: str, event: dict, authenticated_user: dict):
     """Assign a permission to a role"""
     if not check_permission(authenticated_user, "permission:manage"):
@@ -1479,6 +1592,132 @@ def handle_list_components(authenticated_user: dict):
         return ErrorResponse.build(f"Failed to list components: {str(e)}", 500)
 
 
+def handle_get_component(component_name: str, authenticated_user: dict):
+    """Get a single UI component by name"""
+    if not check_permission(authenticated_user, "permission:read"):
+        return ErrorResponse.build("Insufficient permissions", 403)
+    
+    try:
+        pk = f"COMPONENT#{component_name}"
+        sk = "META"
+        
+        response = table.get_item(Key={"PK": pk, "SK": sk})
+        
+        if "Item" not in response:
+            return ErrorResponse.build(f"Component '{component_name}' not found", 404)
+        
+        item = response["Item"]
+        clean_item = simplify({k: v for k, v in item.items() if k not in ["PK", "SK", "entityType"]})
+        
+        return SuccessResponse.build({
+            "message": "Component retrieved successfully",
+            "data": clean_item
+        }, 200)
+        
+    except Exception as e:
+        logger.error(f"Error getting component: {str(e)}")
+        return ErrorResponse.build(f"Failed to get component: {str(e)}", 500)
+
+
+def handle_update_component(component_name: str, event: dict, authenticated_user: dict):
+    """Update an existing UI component"""
+    if not check_permission(authenticated_user, "permission:manage"):
+        return ErrorResponse.build("Insufficient permissions", 403)
+    
+    try:
+        pk = f"COMPONENT#{component_name}"
+        sk = "META"
+        
+        # Check if component exists
+        response = table.get_item(Key={"PK": pk, "SK": sk})
+        if "Item" not in response:
+            return ErrorResponse.build(f"Component '{component_name}' not found", 404)
+        
+        body = json.loads(event.get("body", "{}"))
+        
+        # Build update expression
+        update_expressions = []
+        expression_values = {}
+        expression_names = {}
+        
+        # Updatable fields
+        updatable_fields = {
+            "path": "path",
+            "icon": "icon",
+            "order": "order",
+            "category": "category",
+            "requiredPermissions": "requiredPermissions",
+            "optionalPermissions": "optionalPermissions"
+        }
+        
+        for field, attr_name in updatable_fields.items():
+            if field in body:
+                update_expressions.append(f"#{attr_name} = :{attr_name}")
+                expression_values[f":{attr_name}"] = body[field]
+                expression_names[f"#{attr_name}"] = attr_name
+        
+        if not update_expressions:
+            return ErrorResponse.build("No valid fields to update", 400)
+        
+        # Add updatedAt and updatedBy
+        timestamp = datetime.utcnow().isoformat()
+        update_expressions.append("#updatedAt = :updatedAt")
+        update_expressions.append("#updatedBy = :updatedBy")
+        expression_values[":updatedAt"] = timestamp
+        expression_values[":updatedBy"] = authenticated_user["uid"]
+        expression_names["#updatedAt"] = "updatedAt"
+        expression_names["#updatedBy"] = "updatedBy"
+        
+        # Execute update
+        update_expression = "SET " + ", ".join(update_expressions)
+        
+        response = table.update_item(
+            Key={"PK": pk, "SK": sk},
+            UpdateExpression=update_expression,
+            ExpressionAttributeNames=expression_names,
+            ExpressionAttributeValues=expression_values,
+            ReturnValues="ALL_NEW"
+        )
+        
+        updated_item = response["Attributes"]
+        clean_item = simplify({k: v for k, v in updated_item.items() if k not in ["PK", "SK", "entityType"]})
+        
+        return SuccessResponse.build({
+            "message": "Component updated successfully",
+            "data": clean_item
+        }, 200)
+        
+    except Exception as e:
+        logger.error(f"Error updating component: {str(e)}")
+        return ErrorResponse.build(f"Failed to update component: {str(e)}", 500)
+
+
+def handle_delete_component(component_name: str, authenticated_user: dict):
+    """Delete a UI component"""
+    if not check_permission(authenticated_user, "permission:manage"):
+        return ErrorResponse.build("Insufficient permissions", 403)
+    
+    try:
+        pk = f"COMPONENT#{component_name}"
+        sk = "META"
+        
+        # Check if component exists
+        response = table.get_item(Key={"PK": pk, "SK": sk})
+        if "Item" not in response:
+            return ErrorResponse.build(f"Component '{component_name}' not found", 404)
+        
+        # Delete the component
+        table.delete_item(Key={"PK": pk, "SK": sk})
+        
+        return SuccessResponse.build({
+            "message": f"Component '{component_name}' deleted successfully"
+        }, 200)
+        
+    except Exception as e:
+        logger.error(f"Error deleting component: {str(e)}")
+        return ErrorResponse.build(f"Failed to delete component: {str(e)}", 500)
+
+
 # ====== END RBAC HANDLERS ======
 
 
@@ -1565,9 +1804,23 @@ def lambda_handler(event, context):
             # POST /permissions
             return handle_create_permission(event, authenticated_user)
         
-        elif method == "GET" and "/permissions" in path and "permissionName" in path_parameters:
-            # GET /permissions/{permissionName}
-            return handle_get_permission(path_parameters["permissionName"], authenticated_user)
+        elif method == "GET" and "/permissions" in path and path != "/permissions" and "/roles" not in path and "/users" not in path and "/components" not in path:
+            # GET /permissions/{permissionName} - extract from path
+            permission_name = path.split("/permissions/")[1].split("/")[0] if "/permissions/" in path else None
+            if permission_name:
+                return handle_get_permission(permission_name, authenticated_user)
+        
+        elif method == "PUT" and "/permissions" in path and path != "/permissions" and "/roles" not in path and "/users" not in path and "/components" not in path:
+            # PUT /permissions/{permissionName} - extract from path
+            permission_name = path.split("/permissions/")[1].split("/")[0] if "/permissions/" in path else None
+            if permission_name:
+                return handle_update_permission(permission_name, event, authenticated_user)
+        
+        elif method == "DELETE" and "/permissions" in path and path != "/permissions" and "/roles" not in path and "/users" not in path and "/components" not in path:
+            # DELETE /permissions/{permissionName} - extract from path
+            permission_name = path.split("/permissions/")[1].split("/")[0] if "/permissions/" in path else None
+            if permission_name:
+                return handle_delete_permission(permission_name, authenticated_user)
         
         elif method == "GET" and (path == "/permissions" or (path.endswith("/permissions") and "/users" not in path and "/roles" not in path)):
             # GET /permissions
@@ -1591,6 +1844,36 @@ def lambda_handler(event, context):
             return handle_remove_role_from_user(path_parameters["userId"], path_parameters["roleName"], authenticated_user)
         
         # Component endpoints
+        elif method == "GET" and "/permissions/components" in path and path != "/permissions/components" and "componentName" not in path_parameters:
+            # GET /permissions/components/{componentName} - extract componentName from path
+            component_name = path.split("/permissions/components/")[1].split("/")[0] if "/permissions/components/" in path else None
+            if component_name:
+                return handle_get_component(component_name, authenticated_user)
+        
+        elif method == "GET" and "/permissions/components" in path and "componentName" in path_parameters:
+            # GET /permissions/components/{componentName} - from path parameters
+            return handle_get_component(path_parameters["componentName"], authenticated_user)
+        
+        elif method == "PUT" and "/permissions/components" in path and path != "/permissions/components":
+            # PUT /permissions/components/{componentName} - extract componentName from path
+            component_name = path.split("/permissions/components/")[1].split("/")[0] if "/permissions/components/" in path else None
+            if component_name:
+                return handle_update_component(component_name, event, authenticated_user)
+        
+        elif method == "PUT" and "/permissions/components" in path and "componentName" in path_parameters:
+            # PUT /permissions/components/{componentName} - from path parameters
+            return handle_update_component(path_parameters["componentName"], event, authenticated_user)
+        
+        elif method == "DELETE" and "/permissions/components" in path and path != "/permissions/components":
+            # DELETE /permissions/components/{componentName} - extract componentName from path
+            component_name = path.split("/permissions/components/")[1].split("/")[0] if "/permissions/components/" in path else None
+            if component_name:
+                return handle_delete_component(component_name, authenticated_user)
+        
+        elif method == "DELETE" and "/permissions/components" in path and "componentName" in path_parameters:
+            # DELETE /permissions/components/{componentName} - from path parameters
+            return handle_delete_component(path_parameters["componentName"], authenticated_user)
+        
         elif method == "POST" and "/permissions/components" in path:
             # POST /permissions/components
             return handle_create_component(event, authenticated_user)

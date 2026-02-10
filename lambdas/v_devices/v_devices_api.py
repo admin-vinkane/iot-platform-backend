@@ -219,6 +219,7 @@ class DeviceMeta(BaseModel):
     DeviceType: str
     SerialNumber: str
     devicenum: str = None  # IMEI or unique device identifier
+    deviceNumber: str  # REQUIRED - Unique device number (user must provide)
     Status: str
     Location: str
     EntityType: str
@@ -535,29 +536,29 @@ def lambda_handler(event, context):
                 logger.error(f"Failed to parse body: {e}")
                 return ErrorResponse.build(f"Malformed JSON body: {e}", 400)
             
-            # Validate required fields
-            required_fields = ["StateId", "DistrictId", "MandalId", "VillageId", "HabitationId", "PrimaryDevice", "Status", "InstallationDate"]
+            # Validate required fields (camelCase)
+            required_fields = ["stateId", "districtId", "mandalId", "villageId", "habitationId", "primaryDevice", "status", "installationDate"]
             missing_fields = [field for field in required_fields if not body.get(field)]
             if missing_fields:
                 return ErrorResponse.build(f"Missing required fields: {', '.join(missing_fields)}", 400)
             
             # Validate devices are provided (at least one device required)
-            device_ids = body.get("deviceIds") or body.get("DeviceIds", [])
+            device_ids = body.get("deviceIds", [])
             if not device_ids or not isinstance(device_ids, list) or len(device_ids) == 0:
-                return ErrorResponse.build("At least one device must be provided in 'deviceIds' or 'DeviceIds' array", 400)
+                return ErrorResponse.build("At least one device must be provided in 'deviceIds' array", 400)
             
             # Comprehensive input validation
             is_valid, validation_errors = validate_installation_input(body)
             if not is_valid:
                 return ErrorResponse.build(f"Validation errors: {'; '.join(validation_errors)}", 400)
             
-            # Validate PrimaryDevice value (already checked in validate_installation_input, but keeping for explicitness)
-            if body.get("PrimaryDevice") not in ["water", "chlorine", "none"]:
-                return ErrorResponse.build("PrimaryDevice must be 'water', 'chlorine', or 'none'", 400)
+            # Validate primaryDevice value (already checked in validate_installation_input, but keeping for explicitness)
+            if body.get("primaryDevice") not in ["water", "chlorine", "none"]:
+                return ErrorResponse.build("primaryDevice must be 'water', 'chlorine', or 'none'", 400)
             
-            # Validate Status value
-            if body.get("Status") not in ["active", "inactive"]:
-                return ErrorResponse.build("Status must be 'active' or 'inactive'", 400)
+            # Validate status value
+            if body.get("status") not in ["active", "inactive"]:
+                return ErrorResponse.build("status must be 'active' or 'inactive'", 400)
             
             # Validate optional customerId if provided (skip if permission issues)
             customer_id = body.get("customerId")
@@ -573,10 +574,10 @@ def lambda_handler(event, context):
                 except Exception as e:
                     logger.warning(f"Customer validation skipped: {str(e)}")
             
-            # Validate optional TemplateId if provided
-            if body.get("TemplateId"):
+            # Validate optional templateId if provided
+            if body.get("templateId"):
                 try:
-                    is_valid, error_msg = validate_template_id_exists(body.get("TemplateId"))
+                    is_valid, error_msg = validate_template_id_exists(body.get("templateId"))
                     if not is_valid:
                         return ErrorResponse.build(error_msg, 400)
                 except Exception as e:
@@ -584,11 +585,11 @@ def lambda_handler(event, context):
             
             # Validate all region IDs (skip if permission issues for now)
             region_validations = [
-                ("STATE", body.get("StateId")),
-                ("DISTRICT", body.get("DistrictId")),
-                ("MANDAL", body.get("MandalId")),
-                ("VILLAGE", body.get("VillageId")),
-                ("HABITATION", body.get("HabitationId"))
+                ("STATE", body.get("stateId")),
+                ("DISTRICT", body.get("districtId")),
+                ("MANDAL", body.get("mandalId")),
+                ("VILLAGE", body.get("villageId")),
+                ("HABITATION", body.get("habitationId"))
             ]
             
             for region_type, region_id in region_validations:
@@ -600,11 +601,11 @@ def lambda_handler(event, context):
                     logger.warning(f"Region validation skipped for {region_type}: {str(e)}")
             
             # Check for duplicate installation (same region combination)
-            state_id = body.get("StateId")
-            district_id = body.get("DistrictId")
-            mandal_id = body.get("MandalId")
-            village_id = body.get("VillageId")
-            habitation_id = body.get("HabitationId")
+            state_id = body.get("stateId")
+            district_id = body.get("districtId")
+            mandal_id = body.get("mandalId")
+            village_id = body.get("villageId")
+            habitation_id = body.get("habitationId")
             
             # Create region combination key for atomic duplicate prevention
             region_combo_key = f"{state_id}#{district_id}#{mandal_id}#{village_id}#{habitation_id}"
@@ -618,75 +619,75 @@ def lambda_handler(event, context):
             try:
                 installation_id = str(uuid.uuid4())
                 timestamp = datetime.utcnow().isoformat() + "Z"
-                created_by = body.get("CreatedBy", "system")
+                created_by = body.get("createdBy", "system")
                 
                 installation_item = {
                     "PK": f"INSTALL#{installation_id}",
                     "SK": "META",
-                    "InstallationId": installation_id,
-                    "StateId": body.get("StateId"),
-                    "DistrictId": body.get("DistrictId"),
-                    "MandalId": body.get("MandalId"),
-                    "VillageId": body.get("VillageId"),
-                    "HabitationId": body.get("HabitationId"),
-                    "RegionCombo": region_combo_key,  # Add for future GSI
-                    "PrimaryDevice": body.get("PrimaryDevice"),
-                    "Status": body.get("Status"),
-                    "InstallationDate": body.get("InstallationDate"),
-                    "EntityType": "INSTALL",
-                    "CreatedDate": timestamp,
-                    "UpdatedDate": timestamp,
-                    "CreatedBy": created_by,
-                    "UpdatedBy": created_by
+                    "installationId": installation_id,
+                    "stateId": body.get("stateId"),
+                    "districtId": body.get("districtId"),
+                    "mandalId": body.get("mandalId"),
+                    "villageId": body.get("villageId"),
+                    "habitationId": body.get("habitationId"),
+                    "regionCombo": region_combo_key,  # Add for future GSI
+                    "primaryDevice": body.get("primaryDevice"),
+                    "status": body.get("status"),
+                    "installationDate": body.get("installationDate"),
+                    "entityType": "INSTALL",
+                    "createdDate": timestamp,
+                    "updatedDate": timestamp,
+                    "createdBy": created_by,
+                    "updatedBy": created_by
                 }
                 
                 # Add optional fields
                 customer_id = body.get("customerId")
                 if customer_id:
                     installation_item["customerId"] = customer_id
-                if body.get("TemplateId"):
-                    installation_item["TemplateId"] = body.get("TemplateId")
+                if body.get("templateId"):
+                    installation_item["templateId"] = body.get("templateId")
                 
                 # Handle activation date and warranty calculation
-                activation_date = body.get("ActivationDate") or body.get("activationDate")
-                warranty_period_months = body.get("WarrantyPeriodMonths") or body.get("warrantyPeriodMonths")
-                warranty_date = body.get("WarrantyDate") or body.get("warrantyDate")
+                activation_date = body.get("activationDate")
+                warranty_period_months = body.get("warrantyPeriodMonths")
+                warranty_date = body.get("warrantyDate")
                 
                 # Add activation date if provided
                 if activation_date:
-                    installation_item["ActivationDate"] = activation_date
+                    installation_item["activationDate"] = activation_date
                 
                 # Add warranty period if provided
                 if warranty_period_months:
                     try:
                         warranty_months = int(warranty_period_months)
-                        installation_item["WarrantyPeriodMonths"] = warranty_months
+                        installation_item["warrantyPeriodMonths"] = warranty_months
                         
                         # Calculate warranty date if activation date is provided
                         if activation_date:
                             activation_dt = datetime.fromisoformat(activation_date.replace('Z', '+00:00'))
                             warranty_end_dt = activation_dt + relativedelta(months=warranty_months)
                             calculated_warranty_date = warranty_end_dt.strftime('%Y-%m-%d')
-                            installation_item["WarrantyDate"] = calculated_warranty_date
-                            logger.info(f"Calculated WarrantyDate: {calculated_warranty_date} (ActivationDate: {activation_date} + {warranty_months} months)")
+                            installation_item["warrantyDate"] = calculated_warranty_date
+                            logger.info(f"Calculated warrantyDate: {calculated_warranty_date} (activationDate: {activation_date} + {warranty_months} months)")
                         else:
-                            logger.warning("WarrantyPeriodMonths provided but no ActivationDate - cannot calculate WarrantyDate")
+                            logger.warning("warrantyPeriodMonths provided but no activationDate - cannot calculate warrantyDate")
                     except (ValueError, TypeError) as e:
-                        logger.warning(f"Invalid WarrantyPeriodMonths value: {warranty_period_months}, error: {e}")
+                        logger.warning(f"Invalid warrantyPeriodMonths value: {warranty_period_months}, error: {e}")
                 
                 # If warranty date is directly provided (legacy support), use it
-                if warranty_date and "WarrantyDate" not in installation_item:
-                    installation_item["WarrantyDate"] = warranty_date
-                    logger.info(f"Using directly provided WarrantyDate: {warranty_date}")
+                if warranty_date and "warrantyDate" not in installation_item:
+                    installation_item["warrantyDate"] = warranty_date
+                    logger.info(f"Using directly provided warrantyDate: {warranty_date}")
                 
                 # Create a unique record for region combo to prevent duplicates
                 # This will be used with conditional expression
                 region_lock_item = {
                     "PK": f"REGION_LOCK#{region_combo_key}",
                     "SK": "LOCK",
-                    "InstallationId": installation_id,
-                    "EntityType": "REGION_LOCK",
-                    "CreatedDate": timestamp
+                    "installationId": installation_id,
+                    "entityType": "REGION_LOCK",
+                    "createdDate": timestamp
                 }
                 
                 # First, try to create the region lock atomically
@@ -703,7 +704,7 @@ def lambda_handler(event, context):
                         # Try to find existing installation ID
                         try:
                             existing = table.get_item(Key={"PK": f"REGION_LOCK#{region_combo_key}", "SK": "LOCK"})
-                            existing_id = existing.get("Item", {}).get("InstallationId", "unknown")
+                            existing_id = existing.get("Item", {}).get("installationId", "unknown")
                         except:
                             existing_id = "unknown"
                         return ErrorResponse.build(
@@ -723,11 +724,11 @@ def lambda_handler(event, context):
                 # Fetch and add region names to response
                 response_data = simplify(installation_item)
                 region_names = fetch_region_names(
-                    state_id=response_data.get("StateId"),
-                    district_id=response_data.get("DistrictId"),
-                    mandal_id=response_data.get("MandalId"),
-                    village_id=response_data.get("VillageId"),
-                    habitation_id=response_data.get("HabitationId")
+                    state_id=response_data.get("stateId"),
+                    district_id=response_data.get("districtId"),
+                    mandal_id=response_data.get("mandalId"),
+                    village_id=response_data.get("villageId"),
+                    habitation_id=response_data.get("habitationId")
                 )
                 response_data.update(region_names)
                 
@@ -1737,19 +1738,19 @@ def lambda_handler(event, context):
 
                 install_data = simplify(response["Item"])
 
-                # Fetch and add region names
+                # Fetch and add region names (support both PascalCase and camelCase)
                 region_names = fetch_region_names(
-                    state_id=install_data.get("StateId"),
-                    district_id=install_data.get("DistrictId"),
-                    mandal_id=install_data.get("MandalId"),
-                    village_id=install_data.get("VillageId"),
-                    habitation_id=install_data.get("HabitationId")
+                    state_id=install_data.get("stateId") or install_data.get("StateId"),
+                    district_id=install_data.get("districtId") or install_data.get("DistrictId"),
+                    mandal_id=install_data.get("mandalId") or install_data.get("MandalId"),
+                    village_id=install_data.get("villageId") or install_data.get("VillageId"),
+                    habitation_id=install_data.get("habitationId") or install_data.get("HabitationId")
                 )
                 install_data.update(region_names)
 
                 # If includeCustomer is requested, fetch customer details
                 if include_customer:
-                    customer_id = install_data.get("customerId") or install_data.get("CustomerId")
+                    customer_id = install_data.get("customerId")
                     if customer_id:
                         try:
                             customers_table = dynamodb.Table(os.environ.get("CUSTOMERS_TABLE", "v_customers_dev"))
@@ -1786,7 +1787,8 @@ def lambda_handler(event, context):
 
                     linked_devices = []
                     for assoc in device_response.get("Items", []):
-                        device_id = assoc.get("DeviceId")
+                        # Support both PascalCase and camelCase
+                        device_id = assoc.get("deviceId") or assoc.get("DeviceId")
                         if device_id:
                             device_item = table.get_item(
                                 Key={"PK": f"DEVICE#{device_id}", "SK": "META"}
@@ -1796,9 +1798,9 @@ def lambda_handler(event, context):
                                 # Decrypt device sensitive fields
                                 device_data = prepare_item_for_response(device_data, "DEVICE", decrypt=True)
                                 
-                                # Decrypt SIMHistory fields if present
-                                if "SIMHistory" in device_data and isinstance(device_data["SIMHistory"], list):
-                                    for history_item in device_data["SIMHistory"]:
+                                # Decrypt simHistory fields if present
+                                if "simHistory" in device_data and isinstance(device_data["simHistory"], list):
+                                    for history_item in device_data["simHistory"]:
                                         # Decrypt mobileNumber if it's a JSON string with encrypted_value
                                         if "mobileNumber" in history_item and isinstance(history_item["mobileNumber"], str):
                                             try:
@@ -1821,9 +1823,10 @@ def lambda_handler(event, context):
                                             except (json.JSONDecodeError, Exception):
                                                 pass  # Leave as is if not valid JSON or decryption fails
                                 
-                                device_data["linkedDate"] = assoc.get("LinkedDate")
-                                device_data["linkedBy"] = assoc.get("LinkedBy")
-                                device_data["linkStatus"] = assoc.get("Status")
+                                # Support both PascalCase and camelCase
+                                device_data["linkedDate"] = assoc.get("linkedDate") or assoc.get("LinkedDate")
+                                device_data["linkedBy"] = assoc.get("linkedBy") or assoc.get("LinkedBy")
+                                device_data["linkStatus"] = assoc.get("status") or assoc.get("Status")
                                 linked_devices.append(device_data)
 
                     install_data["linkedDevices"] = linked_devices
@@ -1980,19 +1983,19 @@ def lambda_handler(event, context):
                         if item.get("SK") == "META":
                             install_data = simplify(item)
                             
-                            # Fetch and add region names
+                            # Fetch and add region names (support both PascalCase and camelCase)
                             region_names = fetch_region_names(
-                                state_id=install_data.get("StateId"),
-                                district_id=install_data.get("DistrictId"),
-                                mandal_id=install_data.get("MandalId"),
-                                village_id=install_data.get("VillageId"),
-                                habitation_id=install_data.get("HabitationId")
+                                state_id=install_data.get("stateId") or install_data.get("StateId"),
+                                district_id=install_data.get("districtId") or install_data.get("DistrictId"),
+                                mandal_id=install_data.get("mandalId") or install_data.get("MandalId"),
+                                village_id=install_data.get("villageId") or install_data.get("VillageId"),
+                                habitation_id=install_data.get("habitationId") or install_data.get("HabitationId")
                             )
                             install_data.update(region_names)
                             
                             # If includeCustomer is requested, fetch customer details
                             if include_customer:
-                                customer_id = install_data.get("customerId") or install_data.get("CustomerId")
+                                customer_id = install_data.get("customerId")
                                 if customer_id:
                                     # Query customer from v_customers table
                                     try:
@@ -2019,7 +2022,8 @@ def lambda_handler(event, context):
                             
                             # Store device association metadata for later batch fetch
                             if include_devices:
-                                install_id = install_data.get("InstallationId")
+                                # Support both PascalCase and camelCase
+                                install_id = install_data.get("installationId") or install_data.get("InstallationId")
                                 if install_id:
                                     # Query device associations for this installation
                                     device_response = table.query(
@@ -2033,7 +2037,8 @@ def lambda_handler(event, context):
                                     install_data["_deviceAssociations"] = device_response.get("Items", [])
                             
                             # Query and count contact associations
-                            install_id = install_data.get("InstallationId")
+                            # Support both PascalCase and camelCase
+                            install_id = install_data.get("installationId") or install_data.get("InstallationId")
                             if install_id:
                                 try:
                                     contact_response = table.query(
@@ -2071,7 +2076,7 @@ def lambda_handler(event, context):
                     customer_install_map = {}
                     
                     for i, install in enumerate(installs):
-                        customer_id = install.get("CustomerId")
+                        customer_id = install.get("customerId")
                         if customer_id and customer_id not in customer_install_map:
                             customer_ids_to_fetch.append(customer_id)
                             customer_install_map[customer_id] = []
@@ -2123,7 +2128,8 @@ def lambda_handler(event, context):
                     for i, install in enumerate(installs):
                         assocs = install.pop("_deviceAssociations", [])
                         for assoc in assocs:
-                            device_id = assoc.get("DeviceId")
+                            # Support both PascalCase and camelCase
+                            device_id = assoc.get("deviceId") or assoc.get("DeviceId")
                             if device_id:
                                 device_ids_to_fetch.add(device_id)
                                 if device_id not in device_install_map:
@@ -2147,15 +2153,17 @@ def lambda_handler(event, context):
                                 for item in batch_response.get("Responses", {}).get(TABLE_NAME, []):
                                     device_item = {k: deserializer.deserialize(v) for k, v in item.items()}
                                     device_data = simplify(device_item)
-                                    device_id = device_data.get("DeviceId")
+                                    # Support both PascalCase and camelCase
+                                    device_id = device_data.get("deviceId") or device_data.get("DeviceId")
                                     
                                     if device_id and device_id in device_install_map:
                                         # Apply device to all installations that have it linked
                                         for install_idx, assoc in device_install_map[device_id]:
                                             device_copy = device_data.copy()
-                                            device_copy["linkedDate"] = assoc.get("LinkedDate")
-                                            device_copy["linkedBy"] = assoc.get("LinkedBy")
-                                            device_copy["linkStatus"] = assoc.get("Status")
+                                            # Support both PascalCase and camelCase
+                                            device_copy["linkedDate"] = assoc.get("linkedDate") or assoc.get("LinkedDate")
+                                            device_copy["linkedBy"] = assoc.get("linkedBy") or assoc.get("LinkedBy")
+                                            device_copy["linkStatus"] = assoc.get("status") or assoc.get("Status")
                                             
                                             if "linkedDevices" not in installs[install_idx]:
                                                 installs[install_idx]["linkedDevices"] = []
@@ -2709,7 +2717,8 @@ def lambda_handler(event, context):
                 # Apply encryption/decryption based on decrypt parameter
                 item = prepare_item_for_response(item, "DEVICE", decrypt=should_decrypt)
                 items[i] = item  # Update the list entry
-                device_id = item.get("DeviceId")
+                # Support both PascalCase and camelCase
+                device_id = item.get("deviceId") or item.get("DeviceId")
                 if device_id:
                     # Fetch repair history
                     try:
@@ -2778,18 +2787,18 @@ def lambda_handler(event, context):
                         install_items = install_response.get("Items", [])
                         if install_items:
                             install_assoc = install_items[0]
-                            install_id = install_assoc.get("InstallId")
+                            install_id = install_assoc.get("installId")
                             if install_id:
-                                item["LinkedInstallationId"] = install_id
-                                logger.info(f"Device {device_id}: LinkedInstallationId = {install_id}")
+                                item["linkedInstallationId"] = install_id
+                                logger.info(f"Device {device_id}: linkedInstallationId = {install_id}")
                             else:
-                                item["LinkedInstallationId"] = None
+                                item["linkedInstallationId"] = None
                         else:
                             # Fallback to existing field if present in META
-                            item["LinkedInstallationId"] = item.get("LinkedInstallationId")
+                            item["linkedInstallationId"] = item.get("linkedInstallationId")
                     except Exception as e:
                         logger.error(f"Error fetching linked installation for {device_id}: {str(e)}")
-                        item["LinkedInstallationId"] = None
+                        item["linkedInstallationId"] = None
             
             # Get total device count (only on first page for performance)
             total_count = None
@@ -3253,12 +3262,12 @@ def lambda_handler(event, context):
                                     })
                                     logger.info(f"Deleted bidirectional device association: DEVICE#{device_id} -> {device_install_sk}")
                                     
-                                    # Remove LinkedInstallationId from device META
+                                    # Remove linkedInstallationId from device META
                                     table.update_item(
                                         Key={"PK": f"DEVICE#{device_id}", "SK": "META"},
-                                        UpdateExpression="REMOVE LinkedInstallationId"
+                                        UpdateExpression="REMOVE linkedInstallationId"
                                     )
-                                    logger.info(f"Removed LinkedInstallationId from device {device_id}")
+                                    logger.info(f"Removed linkedInstallationId from device {device_id}")
                                 except Exception as e:
                                     logger.warning(f"Failed to delete bidirectional device association for {device_id}: {str(e)}")
                     
@@ -3564,24 +3573,26 @@ def transform_items_to_json(items, should_decrypt=True):
         if not item or not isinstance(item, dict):
             continue
 
-        entity_type = item.get("EntityType")
+        # Support both PascalCase and camelCase
+        entity_type = item.get("entityType") or item.get("EntityType")
         if not entity_type:
             continue
 
         result = {
             "id": item.get("PK").split("#")[-1] if "#" in item.get("PK", "") else item.get("PK"),
             "type": entity_type,
-            "deviceId": item.get("DeviceId"),
-            "deviceName": item.get("DeviceName"),
-            "deviceType": item.get("DeviceType"),
-            "serialNumber": item.get("SerialNumber"),
-            "status": item.get("Status"),
-            "currentLocation": item.get("Location"),
-            "createdAt": item.get("CreatedDate"),
-            "updatedAt": item.get("UpdatedDate"),
-            "RepairHistory": item.get("RepairHistory"),
-            "LinkedSIM": item.get("LinkedSIM"),
-            "LinkedInstallationId": item.get("LinkedInstallationId"),
+            "deviceId": item.get("deviceId") or item.get("DeviceId"),
+            "deviceName": item.get("deviceName") or item.get("DeviceName"),
+            "deviceType": item.get("deviceType") or item.get("DeviceType"),
+            "deviceNumber": item.get("deviceNumber"),
+            "serialNumber": item.get("serialNumber") or item.get("SerialNumber"),
+            "status": item.get("status") or item.get("Status"),
+            "currentLocation": item.get("location") or item.get("Location"),
+            "createdAt": item.get("createdDate") or item.get("CreatedDate"),
+            "updatedAt": item.get("updatedDate") or item.get("UpdatedDate"),
+            "repairHistory": item.get("repairHistory") or item.get("RepairHistory"),
+            "linkedSIM": item.get("linkedSIM") or item.get("LinkedSIM"),
+            "linkedInstallationId": item.get("linkedInstallationId") or item.get("LinkedInstallationId"),
             "PK": item.get("PK"),
             "SK": item.get("SK")
         }
@@ -4183,14 +4194,14 @@ def execute_install_device_link_transaction(install_id, device_id, performed_by,
                 "Item": {
                     "PK": {"S": f"INSTALL#{install_id}"},
                     "SK": {"S": f"DEVICE_ASSOC#{device_id}"},
-                    "EntityType": {"S": "INSTALL_DEVICE_ASSOC"},
-                    "InstallId": {"S": install_id},
-                    "DeviceId": {"S": device_id},
-                    "Status": {"S": "active"},
-                    "LinkedDate": {"S": timestamp},
-                    "LinkedBy": {"S": performed_by},
-                    "CreatedDate": {"S": timestamp},
-                    "UpdatedDate": {"S": timestamp}
+                    "entityType": {"S": "INSTALL_DEVICE_ASSOC"},
+                    "installId": {"S": install_id},
+                    "deviceId": {"S": device_id},
+                    "status": {"S": "active"},
+                    "linkedDate": {"S": timestamp},
+                    "linkedBy": {"S": performed_by},
+                    "createdDate": {"S": timestamp},
+                    "updatedDate": {"S": timestamp}
                 },
                 "ConditionExpression": "attribute_not_exists(PK) AND attribute_not_exists(SK)"
             }
@@ -4202,14 +4213,14 @@ def execute_install_device_link_transaction(install_id, device_id, performed_by,
                 "Item": {
                     "PK": {"S": f"DEVICE#{device_id}"},
                     "SK": {"S": f"INSTALL_ASSOC#{install_id}"},
-                    "EntityType": {"S": "DEVICE_INSTALL_ASSOC"},
-                    "DeviceId": {"S": device_id},
-                    "InstallId": {"S": install_id},
-                    "Status": {"S": "active"},
-                    "LinkedDate": {"S": timestamp},
-                    "LinkedBy": {"S": performed_by},
-                    "CreatedDate": {"S": timestamp},
-                    "UpdatedDate": {"S": timestamp}
+                    "entityType": {"S": "DEVICE_INSTALL_ASSOC"},
+                    "deviceId": {"S": device_id},
+                    "installId": {"S": install_id},
+                    "status": {"S": "active"},
+                    "linkedDate": {"S": timestamp},
+                    "linkedBy": {"S": performed_by},
+                    "createdDate": {"S": timestamp},
+                    "updatedDate": {"S": timestamp}
                 },
                 "ConditionExpression": "attribute_not_exists(PK) AND attribute_not_exists(SK)"
             }
@@ -4222,7 +4233,7 @@ def execute_install_device_link_transaction(install_id, device_id, performed_by,
                     "PK": {"S": f"DEVICE#{device_id}"},
                     "SK": {"S": "META"}
                 },
-                "UpdateExpression": "SET LinkedInstallationId = :installId, InstallationHistory = list_append(if_not_exists(InstallationHistory, :empty_list), :install_history)",
+                "UpdateExpression": "SET linkedInstallationId = :installId, installationHistory = list_append(if_not_exists(installationHistory, :empty_list), :install_history)",
                 "ExpressionAttributeValues": {
                     ":installId": {"S": install_id},
                     ":empty_list": {"L": []},
@@ -4302,14 +4313,14 @@ def execute_install_device_unlink_transaction(install_id, device_id, performed_b
             }
         },
         {
-            # Update device META record to remove LinkedInstallationId and add unlink history
+            # Update device META record to remove linkedInstallationId and add unlink history
             "Update": {
                 "TableName": TABLE_NAME,
                 "Key": {
                     "PK": {"S": f"DEVICE#{device_id}"},
                     "SK": {"S": "META"}
                 },
-                "UpdateExpression": "REMOVE LinkedInstallationId SET InstallationHistory = list_append(if_not_exists(InstallationHistory, :empty_list), :install_history)",
+                "UpdateExpression": "REMOVE linkedInstallationId SET installationHistory = list_append(if_not_exists(installationHistory, :empty_list), :install_history)",
                 "ExpressionAttributeValues": {
                     ":empty_list": {"L": []},
                     ":install_history": {

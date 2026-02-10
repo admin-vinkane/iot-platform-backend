@@ -3,20 +3,31 @@
 # iot-platform-backend
 
 ## Overview
-This project provides backend Lambda functions for IoT device and region management, using AWS Lambda and DynamoDB. Each Lambda is versioned by git commit and deployed via a build script.
+This project provides backend Lambda functions for IoT device management, region management, user management, and navigation/menu management, using AWS Lambda and DynamoDB. Each Lambda is versioned by git commit and deployed via a build script.
 
 ## Structure
-- `lambdas/` — Contains Lambda source code for `v_devices` and `v_regions`.
-- `shared/` — Shared Python utilities (e.g., response formatting).
+- `lambdas/` — Contains Lambda source code for:
+  - `v_devices` — Device management API
+  - `v_regions` — Region management API
+  - `v_users` — User management and RBAC/Permissions API
+  - `v_navigation` — Navigation/Menu management API
+  - `v_customers` — Customer management API
+  - `v_simcards` — SIM card management API
+  - Other domain-specific lambdas
+- `shared/` — Shared Python utilities (e.g., response formatting, encryption).
 - `iam/` — Example IAM policies for Lambdas.
 - `scripts/` — Build and deployment scripts.
 - `tests/` — Test events and unit tests.
+- `docs/` — API documentation and implementation guides.
 
 ## Setup
 1. Clone the repo and install dependencies for each Lambda:
   ```sh
   pip3 install -r lambdas/v_devices/requirements.txt
   pip3 install -r lambdas/v_regions/requirements.txt
+  pip3 install -r lambdas/v_users/requirements.txt
+  pip3 install -r lambdas/v_navigation/requirements.txt
+  # ... and other lambdas as needed
   ```
 2. Configure AWS CLI and credentials.
 3. Use AWS Secrets Manager or SSM Parameter Store for secrets, not plain environment variables.
@@ -124,6 +135,9 @@ chmod +x scripts/package_and_upload_lambda.sh
 
 # Package and upload v_regions to prod environment  
 ./scripts/package_and_upload_lambda.sh lambdas/v_regions --env prod --upload
+
+# Package and upload v_navigation to dev environment
+./scripts/package_and_upload_lambda.sh lambdas/v_navigation --env dev --upload
 ```
 
 **Behavior:**
@@ -152,6 +166,9 @@ See script headers for more options and usage details.
 ```sh
 pip install -r lambdas/v_devices/requirements.txt
 pip install -r lambdas/v_regions/requirements.txt
+pip install -r lambdas/v_users/requirements.txt
+pip install -r lambdas/v_navigation/requirements.txt
+# ... and other lambdas as needed
 ```
 
 s3://<your-lambda-bucket>/<lambda>/<commit-hash>/<lambda>.zip
@@ -197,10 +214,65 @@ s3://<your-lambda-bucket>/<lambda>/<commit-hash>/<lambda>.zip
 - Run unit tests using pytest
 ```pytest```
 
+## API Documentation
+
+📚 **[Complete API Overview](docs/API_OVERVIEW.md)** - All endpoints across all services
+
+### Available APIs
+
+| Lambda | Purpose | Documentation |
+|--------|---------|---------------|
+| `v_navigation` 🆕 | Navigation/Menu management | [NAVIGATION_API_IMPLEMENTATION.md](docs/NAVIGATION_API_IMPLEMENTATION.md) |
+| `v_users` | User management, RBAC, Permissions | [USERS_API_IMPROVEMENTS.md](docs/USERS_API_IMPROVEMENTS.md) |
+| `v_devices` | Device management | [DEVICES_API_ROUTES.md](docs/DEVICES_API_ROUTES.md) |
+| `v_regions` | Region management | [REGIONS_API_GUIDE.md](docs/REGIONS_API_GUIDE.md) |
+| `v_customers` | Customer management | [CUSTOMER_ENDPOINTS_REVIEW.md](docs/CUSTOMER_ENDPOINTS_REVIEW.md) |
+
+### Navigation API (NEW)
+
+The Navigation API provides complete menu/navigation management with:
+- **11 endpoints** for CRUD operations on groups and items
+- **Audit trail** tracking all changes with before/after values
+- **Validation** for uniqueness, ordering, and path formats
+- **Hierarchical structure** with groups containing items
+
+**Quick Start:**
+```bash
+# List all navigation groups with items
+GET /navigation/groups
+
+# Create a navigation group
+POST /navigation/groups
+{
+  "label": "Administration",
+  "icon": "Shield",
+  "order": 1
+}
+
+# Create a navigation item
+POST /navigation/groups/{groupId}/items
+{
+  "label": "Menu Management",
+  "icon": "Grid",
+  "path": "/menu-management",
+  "permission": "can_manage_navigation",
+  "order": 1
+}
+```
+
+See [NAVIGATION_API_IMPLEMENTATION.md](docs/NAVIGATION_API_IMPLEMENTATION.md) for complete documentation.
+
+### Infrastructure
+
+For Terraform infrastructure setup:
+- [NAVIGATION_TERRAFORM_INFRA.md](docs/NAVIGATION_TERRAFORM_INFRA.md) - Complete DynamoDB and API Gateway configuration
+- [NAVIGATION_INFRA_QUICK_REFERENCE.md](NAVIGATION_INFRA_QUICK_REFERENCE.md) - Quick reference for table and routes
+
 ## API Usage
 Each Lambda expects HTTP events with the following:
-- `POST`/`PUT`: JSON body with `PK` and `SK` (string IDs)
-- `GET`/`DELETE`: Query/path params with `PK` and `SK`
+- `POST`/`PUT`: JSON body with required fields (varies by endpoint)
+- `GET`/`DELETE`: Query/path params with resource identifiers
+- All responses follow standardized format using `shared.response_utils`
 
 
 ## Security
@@ -209,6 +281,16 @@ Each Lambda expects HTTP events with the following:
 
 ## CI/CD
 - Recommended: Add GitHub Actions for linting, testing, and deployment automation.
+
+## Deployment Status
+
+| Lambda | Deployment Status | Last Updated |
+|--------|------------------|--------------|
+| v_navigation | ✅ Deployed | 2026-02-10 |
+| v_users | ✅ Deployed | - |
+| v_devices | ✅ Deployed | - |
+| v_regions | ✅ Deployed | - |
+| v_customers | ✅ Deployed | - |
 
 ## Authors
 - Your Name

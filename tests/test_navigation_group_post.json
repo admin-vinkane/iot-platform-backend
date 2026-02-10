@@ -1,0 +1,8 @@
+{
+  "httpMethod": "POST",
+  "path": "/navigation/groups",
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"label\":\"Administration\",\"icon\":\"Shield\",\"isActive\":true,\"order\":1,\"isCollapsible\":true,\"defaultExpanded\":false,\"createdBy\":\"admin@example.com\",\"updatedBy\":\"admin@example.com\"}"
+}
