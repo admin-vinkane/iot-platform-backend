@@ -1842,8 +1842,8 @@ def lambda_handler(event, context):
 
         elif (
             method == "DELETE"
-            and path.startswith("/permissions/roles/")
-            and "/permissions/" in path
+            and "/permissions/roles/" in path
+            and path.count("/permissions/") > 1
             and "permissionId" not in path_parameters
         ):
             return ErrorResponse.build("Missing required path parameter: permissionId", 400)
