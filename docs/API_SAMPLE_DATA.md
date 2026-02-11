@@ -2869,6 +2869,7 @@ curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/
 {
   "message": "Permission created successfully",
   "data": {
+    "permissionId": "1f4c9c0a-6b5f-4f9a-8dd8-90a4b0b4a2a6",
     "permissionName": "device:read",
     "displayName": "Read Device",
     "description": "View device information",
@@ -2895,6 +2896,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
   "message": "Permissions retrieved successfully",
   "data": [
     {
+      "permissionId": "a1b5c8d4-5b2c-4a3a-8d6b-1f5d0b6a2f3c",
       "permissionName": "dashboard:read",
       "displayName": "Read Dashboard",
       "description": "View dashboard and metrics",
@@ -2912,11 +2914,11 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 }
 ```
 
-#### GET /users/permissions/{permissionName}
-**Description:** Get a specific permission by name  
+#### GET /users/permissions/{permissionId}
+**Description:** Get a specific permission by id  
 **Request:**
 ```bash
-curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/device:read"
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/1f4c9c0a-6b5f-4f9a-8dd8-90a4b0b4a2a6"
 ```
 
 **Response (200):**
@@ -2924,6 +2926,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 {
   "message": "Permission retrieved successfully",
   "data": {
+    "permissionId": "1f4c9c0a-6b5f-4f9a-8dd8-90a4b0b4a2a6",
     "permissionName": "device:read",
     "displayName": "Read Device",
     "description": "View device information",
@@ -2937,12 +2940,12 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 }
 ```
 
-#### PUT /users/permissions/{permissionName}
+#### PUT /users/permissions/{permissionId}
 **Description:** Update an existing permission (can update displayName, description, category only)  
-**Note:** `permissionName`, `resource`, and `action` are immutable and cannot be changed  
+**Note:** `permissionId`, `permissionName`, `resource`, and `action` are immutable and cannot be changed  
 **Request:**
 ```bash
-curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/device:read" \
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/1f4c9c0a-6b5f-4f9a-8dd8-90a4b0b4a2a6" \
   -H "Content-Type: application/json" \
   -d '{
     "displayName": "View Device Details",
@@ -2956,6 +2959,7 @@ curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 {
   "message": "Permission updated successfully",
   "data": {
+    "permissionId": "1f4c9c0a-6b5f-4f9a-8dd8-90a4b0b4a2a6",
     "permissionName": "device:read",
     "displayName": "View Device Details",
     "description": "View comprehensive device information and status",
@@ -2977,11 +2981,11 @@ curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 }
 ```
 
-#### DELETE /users/permissions/{permissionName}
+#### DELETE /users/permissions/{permissionId}
 **Description:** Delete a permission (with safety check for role assignments)  
 **Request:**
 ```bash
-curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/device:test"
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/00000000-0000-0000-0000-000000000000"
 ```
 
 **Response (200):**
@@ -3001,7 +3005,7 @@ curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/user
 **Error Response (404) - Not found:**
 ```json
 {
-  "error": "Permission 'device:test' not found"
+  "error": "Permission '00000000-0000-0000-0000-000000000000' not found"
 }
 ```
 
@@ -3030,6 +3034,7 @@ curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/
 {
   "message": "Role created successfully",
   "data": {
+    "roleId": "3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21",
     "roleName": "device_manager",
     "displayName": "Device Manager",
     "description": "Manages devices and installations",
@@ -3055,6 +3060,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
   "message": "Roles retrieved successfully",
   "data": [
     {
+      "roleId": "8c0b9c7b-2e6d-4b2f-9e6b-5f5b9b1c70d8",
       "roleName": "admin",
       "displayName": "Administrator",
       "description": "Full system access with all permissions",
@@ -3065,6 +3071,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
       "createdBy": "dev-admin-uid"
     },
     {
+      "roleId": "3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21",
       "roleName": "device_manager",
       "displayName": "Device Manager",
       "description": "Manages devices and installations",
@@ -3093,11 +3100,11 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 - `customer` (level 20) - 6 customer portal permissions
 - `customer_super_user` (level 25) - 7 enhanced customer permissions
 
-#### GET /users/permissions/roles/{roleName}
-**Description:** Get a specific role by name  
+#### GET /users/permissions/roles/{roleId}
+**Description:** Get a specific role by id  
 **Request:**
 ```bash
-curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/admin"
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/8c0b9c7b-2e6d-4b2f-9e6b-5f5b9b1c70d8"
 ```
 
 **Response (200):**
@@ -3105,6 +3112,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 {
   "message": "Role retrieved successfully",
   "data": {
+    "roleId": "8c0b9c7b-2e6d-4b2f-9e6b-5f5b9b1c70d8",
     "roleName": "admin",
     "displayName": "Administrator",
     "description": "Full system access with all permissions",
@@ -3117,11 +3125,11 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 }
 ```
 
-#### PUT /users/permissions/roles/{roleName}
+#### PUT /users/permissions/roles/{roleId}
 **Description:** Update an existing role (cannot update system roles)  
 **Request:**
 ```bash
-curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/device_manager" \
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21" \
   -H "Content-Type: application/json" \
   -d '{
     "displayName": "Senior Device Manager",
@@ -3135,6 +3143,7 @@ curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 {
   "message": "Role updated successfully",
   "data": {
+    "roleId": "3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21",
     "roleName": "device_manager",
     "displayName": "Senior Device Manager",
     "description": "Manages all devices and installations",
@@ -3147,17 +3156,17 @@ curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 }
 ```
 
-#### DELETE /users/permissions/roles/{roleName}
+#### DELETE /users/permissions/roles/{roleId}
 **Description:** Delete a role (cannot delete system roles)  
 **Request:**
 ```bash
-curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/custom_role"
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21"
 ```
 
 **Response (200):**
 ```json
 {
-  "message": "Role 'custom_role' deleted successfully"
+  "message": "Role '3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21' deleted successfully"
 }
 ```
 
@@ -3165,14 +3174,14 @@ curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/user
 
 ### 3.1.3. Role-Permission Assignments
 
-#### POST /users/permissions/roles/{roleName}/permissions
+#### POST /users/permissions/roles/{roleId}/permissions
 **Description:** Assign a permission to a role  
 **Request:**
 ```bash
-curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/device_manager/permissions" \
+curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21/permissions" \
   -H "Content-Type: application/json" \
   -d '{
-    "permissionName": "device:read"
+    "permissionId": "1f4c9c0a-6b5f-4f9a-8dd8-90a4b0b4a2a6"
   }'
 ```
 
@@ -3181,7 +3190,9 @@ curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/
 {
   "message": "Permission assigned to role successfully",
   "data": {
+    "roleId": "3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21",
     "roleName": "device_manager",
+    "permissionId": "1f4c9c0a-6b5f-4f9a-8dd8-90a4b0b4a2a6",
     "permissionName": "device:read",
     "assignedAt": "2026-02-09T03:11:57.123456",
     "assignedBy": "dev-admin-uid"
@@ -3189,11 +3200,11 @@ curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/
 }
 ```
 
-#### GET /users/permissions/roles/{roleName}/permissions
+#### GET /users/permissions/roles/{roleId}/permissions
 **Description:** Get all permissions for a role  
 **Request:**
 ```bash
-curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/admin/permissions"
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/8c0b9c7b-2e6d-4b2f-9e6b-5f5b9b1c70d8/permissions"
 ```
 
 **Response (200):**
@@ -3202,6 +3213,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
   "message": "Role permissions retrieved successfully",
   "data": [
     {
+      "permissionId": "a1b5c8d4-5b2c-4a3a-8d6b-1f5d0b6a2f3c",
       "permissionName": "dashboard:read",
       "displayName": "Read Dashboard",
       "description": "View dashboard and metrics",
@@ -3210,6 +3222,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
       "category": "Dashboard"
     },
     {
+      "permissionId": "1f4c9c0a-6b5f-4f9a-8dd8-90a4b0b4a2a6",
       "permissionName": "device:read",
       "displayName": "Read Device",
       "description": "View device information",
@@ -3231,28 +3244,28 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
     "count": 13
   },
   "data": [
-    {"permissionName": "dashboard:read"},
-    {"permissionName": "device:read"},
-    {"permissionName": "device:create"},
-    {"permissionName": "device:update"},
-    {"permissionName": "device:control"},
-    {"permissionName": "device:audit"},
-    {"permissionName": "installation:read"},
-    {"permissionName": "installation:create"},
-    {"permissionName": "installation:update"},
-    {"permissionName": "installation:delete"},
-    {"permissionName": "installation:audit"},
-    {"permissionName": "installation:link_device"},
-    {"permissionName": "installation:unlink_device"}
+    {"permissionId": "a1b5c8d4-5b2c-4a3a-8d6b-1f5d0b6a2f3c", "permissionName": "dashboard:read"},
+    {"permissionId": "1f4c9c0a-6b5f-4f9a-8dd8-90a4b0b4a2a6", "permissionName": "device:read"},
+    {"permissionId": "d2a76f6b-8f4a-4c6c-8a5b-0d9a1e2f3b4c", "permissionName": "device:create"},
+    {"permissionId": "7d6f8a9b-4c3b-4d2a-9f8e-1a2b3c4d5e6f", "permissionName": "device:update"},
+    {"permissionId": "a3b4c5d6-7e8f-4a9b-8c7d-6e5f4a3b2c1d", "permissionName": "device:control"},
+    {"permissionId": "0f1e2d3c-4b5a-6978-9c0d-1e2f3a4b5c6d", "permissionName": "device:audit"},
+    {"permissionId": "f1e2d3c4-b5a6-4798-90cd-1e2f3a4b5c6d", "permissionName": "installation:read"},
+    {"permissionId": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e", "permissionName": "installation:create"},
+    {"permissionId": "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f", "permissionName": "installation:update"},
+    {"permissionId": "d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70", "permissionName": "installation:delete"},
+    {"permissionId": "e5f6a7b8-c9d0-4e1f-8a2b-3c4d5e6f7081", "permissionName": "installation:audit"},
+    {"permissionId": "f6a7b8c9-d0e1-4f2a-9b3c-4d5e6f708192", "permissionName": "installation:link_device"},
+    {"permissionId": "a7b8c9d0-e1f2-4a3b-8c4d-5e6f708192a3", "permissionName": "installation:unlink_device"}
   ]
 }
 ```
 
-#### DELETE /users/permissions/roles/{roleName}/permissions/{permissionName}
+#### DELETE /users/permissions/roles/{roleId}/permissions/{permissionId}
 **Description:** Remove a permission from a role  
 **Request:**
 ```bash
-curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/device_manager/permissions/device:delete"
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/roles/3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21/permissions/00000000-0000-0000-0000-000000000000"
 ```
 
 **Response (200):**
@@ -3274,7 +3287,7 @@ curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/
   -H "Content-Type: application/json" \
   -d '{
     "userId": "nagendrantn@gmail.com",
-    "roleName": "device_manager",
+    "roleId": "3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21",
     "assignedBy": "admin@vinkane.com",
     "expiresAt": "2027-02-09T00:00:00Z"
   }'
@@ -3286,6 +3299,7 @@ curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/
   "message": "Role assigned to user successfully",
   "data": {
     "userId": "nagendrantn@gmail.com",
+    "roleId": "3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21",
     "roleName": "device_manager",
     "assignedAt": "2026-02-09T03:11:57.500000",
     "assignedBy": "admin@vinkane.com",
@@ -3307,6 +3321,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
   "message": "User roles retrieved successfully",
   "data": [
     {
+      "roleId": "3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21",
       "roleName": "device_manager",
       "displayName": "Device Manager",
       "description": "Manages devices and installations",
@@ -3377,11 +3392,11 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 }
 ```
 
-#### DELETE /users/permissions/users/{userId}/roles/{roleName}
+#### DELETE /users/permissions/users/{userId}/roles/{roleId}
 **Description:** Remove a role from a user  
 **Request:**
 ```bash
-curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/users/nagendrantn@gmail.com/roles/device_manager"
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/users/nagendrantn@gmail.com/roles/3a1f3e6c-2ad8-4f2e-b469-090b2b2f3a21"
 ```
 
 **Response (200):**
@@ -3417,6 +3432,7 @@ curl -X POST "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/
 {
   "message": "Component created successfully",
   "data": {
+    "componentId": "e9f83f1a-7e2d-4d94-8fb5-1fd3d1b2d79a",
     "componentName": "DeviceConfigurationPage",
     "path": "/devices",
     "icon": "settings",
@@ -3444,6 +3460,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
   "message": "Components retrieved successfully",
   "data": [
     {
+      "componentId": "c8e8ef56-6f48-4e6a-86ad-9d3df19e6a1f",
       "componentName": "DashboardPage",
       "path": "/dashboard",
       "icon": "dashboard",
@@ -3453,6 +3470,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
       "optionalPermissions": []
     },
     {
+      "componentId": "cf3e3de8-bf7c-4cde-b7a2-59d1b8a7a7a7",
       "componentName": "DeviceConfigurationPage",
       "path": "/devices",
       "icon": "settings",
@@ -3462,6 +3480,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
       "optionalPermissions": ["device:create", "device:update"]
     },
     {
+      "componentId": "c2e1e005-2d6a-4895-87af-05fe1e3ea0be",
       "componentName": "InstallationManagementPage",
       "path": "/installations",
       "icon": "build",
@@ -3477,11 +3496,11 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 }
 ```
 
-#### GET /users/permissions/components/{componentName}
-**Description:** Get a specific UI component by name  
+#### GET /users/permissions/components/{componentId}
+**Description:** Get a specific UI component by id  
 **Request:**
 ```bash
-curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/components/DashboardPage"
+curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/components/c8e8ef56-6f48-4e6a-86ad-9d3df19e6a1f"
 ```
 
 **Response (200):**
@@ -3489,6 +3508,7 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 {
   "message": "Component retrieved successfully",
   "data": {
+    "componentId": "c8e8ef56-6f48-4e6a-86ad-9d3df19e6a1f",
     "componentName": "DashboardPage",
     "path": "/dashboard",
     "icon": "dashboard",
@@ -3506,17 +3526,17 @@ curl -X GET "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 **Error Response (404):**
 ```json
 {
-  "error": "Component 'UnknownPage' not found"
+  "error": "Component '00000000-0000-0000-0000-000000000000' not found"
 }
 ```
 
-#### PUT /users/permissions/components/{componentName}
+#### PUT /users/permissions/components/{componentId}
 **Description:** Update an existing UI component  
 **Updatable Fields:** path, icon, order, category, requiredPermissions, optionalPermissions  
-**Note:** `componentName` is immutable and cannot be changed  
+**Note:** `componentId` and `componentName` are immutable and cannot be changed  
 **Request:**
 ```bash
-curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/components/DashboardPage" \
+curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/components/c8e8ef56-6f48-4e6a-86ad-9d3df19e6a1f" \
   -H "Content-Type: application/json" \
   -d '{
     "path": "/home",
@@ -3533,6 +3553,7 @@ curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 {
   "message": "Component updated successfully",
   "data": {
+    "componentId": "c8e8ef56-6f48-4e6a-86ad-9d3df19e6a1f",
     "componentName": "DashboardPage",
     "path": "/home",
     "icon": "home",
@@ -3558,28 +3579,28 @@ curl -X PUT "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/p
 **Error Response (404):**
 ```json
 {
-  "error": "Component 'UnknownPage' not found"
+  "error": "Component '00000000-0000-0000-0000-000000000000' not found"
 }
 ```
 
-#### DELETE /users/permissions/components/{componentName}
+#### DELETE /users/permissions/components/{componentId}
 **Description:** Delete a UI component  
 **Request:**
 ```bash
-curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/components/TestComponent"
+curl -X DELETE "https://103wz10k37.execute-api.ap-south-2.amazonaws.com/dev/users/permissions/components/c8e8ef56-6f48-4e6a-86ad-9d3df19e6a1f"
 ```
 
 **Response (200):**
 ```json
 {
-  "message": "Component 'TestComponent' deleted successfully"
+  "message": "Component 'c8e8ef56-6f48-4e6a-86ad-9d3df19e6a1f' deleted successfully"
 }
 ```
 
 **Error Response (404):**
 ```json
 {
-  "error": "Component 'TestComponent' not found"
+  "error": "Component '00000000-0000-0000-0000-000000000000' not found"
 }
 ```
 
@@ -3624,11 +3645,11 @@ When `DEV_MODE=true`, authentication is bypassed and a mock admin user is used:
 
 #### DynamoDB Schema
 **Entity Types:**
-- `ROLE` - Role metadata (PK: `ROLE#{roleName}`, SK: `META`)
-- `PERMISSION` - Permission metadata (PK: `PERMISSION#{permissionName}`, SK: `META`)
-- `ROLE_PERMISSION` - Assignment (PK: `ROLE#{roleName}`, SK: `PERMISSION#{permissionName}`)
-- `USER_ROLE` - Assignment (PK: `USER#{userId}`, SK: `ROLE#{roleName}`)
-- `COMPONENT` - UI component (PK: `COMPONENT#{componentName}`, SK: `META`)
+- `ROLE` - Role metadata (PK: `ROLE#{roleId}`, SK: `META`)
+- `PERMISSION` - Permission metadata (PK: `PERMISSION#{permissionId}`, SK: `META`)
+- `ROLE_PERMISSION` - Assignment (PK: `ROLE#{roleId}`, SK: `PERMISSION#{permissionName}`)
+- `USER_ROLE` - Assignment (PK: `USER#{userId}`, SK: `ROLE#{roleId}`)
+- `COMPONENT` - UI component (PK: `COMPONENT#{componentId}`, SK: `META`)
 
 #### Common Errors
 

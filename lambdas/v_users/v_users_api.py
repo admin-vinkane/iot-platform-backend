@@ -2,6 +2,7 @@ import json
 import os
 import boto3
 import logging
+import uuid
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
@@ -190,7 +191,7 @@ class PermissionUpdate(BaseModel):
 
 class UserRoleAssignment(BaseModel):
     userId: str = Field(..., min_length=1)
-    roleName: str = Field(..., min_length=1)
+    roleId: str = Field(..., min_length=1)
     assignedBy: Optional[str] = None
     expiresAt: Optional[str] = None
 
@@ -814,13 +815,21 @@ def handle_create_role(event: dict, authenticated_user: dict):
         role_data = RoleCreate(**body)
         
         role_name = role_data.roleName.lower().replace(" ", "_")
-        pk = f"ROLE#{role_name}"
-        sk = "META"
-        
-        # Check if role already exists
-        response = table.get_item(Key={"PK": pk, "SK": sk})
-        if "Item" in response:
+
+        # Check if role already exists by name
+        response = table.scan(
+            FilterExpression="entityType = :entity_type AND roleName = :role_name",
+            ExpressionAttributeValues={
+                ":entity_type": ENTITY_TYPE_ROLE,
+                ":role_name": role_name
+            }
+        )
+        if response.get("Items"):
             return ErrorResponse.build(f"Role '{role_name}' already exists", 409)
+
+        role_id = str(uuid.uuid4())
+        pk = f"ROLE#{role_id}"
+        sk = "META"
         
         # Create role item
         timestamp = datetime.utcnow().isoformat()
@@ -828,6 +837,7 @@ def handle_create_role(event: dict, authenticated_user: dict):
             "PK": pk,
             "SK": sk,
             "entityType": ENTITY_TYPE_ROLE,
+            "roleId": role_id,
             "roleName": role_name,
             "displayName": role_data.displayName,
             "description": role_data.description,
@@ -851,19 +861,19 @@ def handle_create_role(event: dict, authenticated_user: dict):
         return ErrorResponse.build(f"Failed to create role: {str(e)}", 500)
 
 
-def handle_get_role(role_name: str, authenticated_user: dict):
-    """Get role by name"""
+def handle_get_role(role_id: str, authenticated_user: dict):
+    """Get role by id"""
     if not check_permission(authenticated_user, "permission:read"):
         return ErrorResponse.build("Insufficient permissions", 403)
     
     try:
-        pk = f"ROLE#{role_name}"
+        pk = f"ROLE#{role_id}"
         sk = "META"
         
         response = table.get_item(Key={"PK": pk, "SK": sk})
         
         if "Item" not in response:
-            return ErrorResponse.build(f"Role '{role_name}' not found", 404)
+            return ErrorResponse.build(f"Role '{role_id}' not found", 404)
         
         item = response["Item"]
         clean_item = simplify({k: v for k, v in item.items() if k not in ["PK", "SK", "entityType"]})
@@ -900,7 +910,7 @@ def handle_list_roles(authenticated_user: dict):
         return ErrorResponse.build(f"Failed to list roles: {str(e)}", 500)
 
 
-def handle_update_role(role_name: str, event: dict, authenticated_user: dict):
+def handle_update_role(role_id: str, event: dict, authenticated_user: dict):
     """Update an existing role"""
     if not check_permission(authenticated_user, "permission:manage"):
         return ErrorResponse.build("Insufficient permissions", 403)
@@ -909,13 +919,13 @@ def handle_update_role(role_name: str, event: dict, authenticated_user: dict):
         body = json.loads(event.get("body", "{}"))
         update_data = RoleUpdate(**body)
         
-        pk = f"ROLE#{role_name}"
+        pk = f"ROLE#{role_id}"
         sk = "META"
         
         # Check if role exists
         response = table.get_item(Key={"PK": pk, "SK": sk})
         if "Item" not in response:
-            return ErrorResponse.build(f"Role '{role_name}' not found", 404)
+            return ErrorResponse.build(f"Role '{role_id}' not found", 404)
         
         existing_item = response["Item"]
         
@@ -971,19 +981,19 @@ def handle_update_role(role_name: str, event: dict, authenticated_user: dict):
         return ErrorResponse.build(f"Failed to update role: {str(e)}", 500)
 
 
-def handle_delete_role(role_name: str, authenticated_user: dict):
+def handle_delete_role(role_id: str, authenticated_user: dict):
     """Delete a role"""
     if not check_permission(authenticated_user, "permission:manage"):
         return ErrorResponse.build("Insufficient permissions", 403)
     
     try:
-        pk = f"ROLE#{role_name}"
+        pk = f"ROLE#{role_id}"
         sk = "META"
         
         # Check if role exists
         response = table.get_item(Key={"PK": pk, "SK": sk})
         if "Item" not in response:
-            return ErrorResponse.build(f"Role '{role_name}' not found", 404)
+            return ErrorResponse.build(f"Role '{role_id}' not found", 404)
         
         existing_item = response["Item"]
         
@@ -994,11 +1004,31 @@ def handle_delete_role(role_name: str, authenticated_user: dict):
         # Delete role
         table.delete_item(Key={"PK": pk, "SK": sk})
         
-        return SuccessResponse.build({"message": f"Role '{role_name}' deleted successfully"}, 200)
+        return SuccessResponse.build({"message": f"Role '{role_id}' deleted successfully"}, 200)
         
     except Exception as e:
         logger.error(f"Error deleting role: {str(e)}")
         return ErrorResponse.build(f"Failed to delete role: {str(e)}", 500)
+
+
+def get_permission_by_name(permission_name: str) -> Dict[str, Any]:
+    """Return the permission item for a permissionName, or an empty dict."""
+    response = table.scan(
+        FilterExpression="entityType = :entity_type AND permissionName = :permission_name",
+        ExpressionAttributeValues={
+            ":entity_type": ENTITY_TYPE_PERMISSION,
+            ":permission_name": permission_name
+        }
+    )
+
+    items = response.get("Items", [])
+    return items[0] if items else {}
+
+
+def get_permission_by_id(permission_id: str) -> Dict[str, Any]:
+    """Return the permission item for a permissionId, or an empty dict."""
+    response = table.get_item(Key={"PK": f"PERMISSION#{permission_id}", "SK": "META"})
+    return response.get("Item", {})
 
 
 def handle_create_permission(event: dict, authenticated_user: dict):
@@ -1010,13 +1040,14 @@ def handle_create_permission(event: dict, authenticated_user: dict):
         body = json.loads(event.get("body", "{}"))
         perm_data = PermissionCreate(**body)
         
-        pk = f"PERMISSION#{perm_data.permissionName}"
-        sk = "META"
-        
-        # Check if permission already exists
-        response = table.get_item(Key={"PK": pk, "SK": sk})
-        if "Item" in response:
+        # Check if permission already exists by name
+        existing_permission = get_permission_by_name(perm_data.permissionName)
+        if existing_permission:
             return ErrorResponse.build(f"Permission '{perm_data.permissionName}' already exists", 409)
+
+        permission_id = str(uuid.uuid4())
+        pk = f"PERMISSION#{permission_id}"
+        sk = "META"
         
         # Create permission item
         timestamp = datetime.utcnow().isoformat()
@@ -1024,6 +1055,7 @@ def handle_create_permission(event: dict, authenticated_user: dict):
             "PK": pk,
             "SK": sk,
             "entityType": ENTITY_TYPE_PERMISSION,
+            "permissionId": permission_id,
             "permissionName": perm_data.permissionName,
             "displayName": perm_data.displayName,
             "description": perm_data.description,
@@ -1048,19 +1080,19 @@ def handle_create_permission(event: dict, authenticated_user: dict):
         return ErrorResponse.build(f"Failed to create permission: {str(e)}", 500)
 
 
-def handle_get_permission(permission_name: str, authenticated_user: dict):
-    """Get permission by name"""
+def handle_get_permission(permission_id: str, authenticated_user: dict):
+    """Get permission by id"""
     if not check_permission(authenticated_user, "permission:read"):
         return ErrorResponse.build("Insufficient permissions", 403)
     
     try:
-        pk = f"PERMISSION#{permission_name}"
+        pk = f"PERMISSION#{permission_id}"
         sk = "META"
         
         response = table.get_item(Key={"PK": pk, "SK": sk})
         
         if "Item" not in response:
-            return ErrorResponse.build(f"Permission '{permission_name}' not found", 404)
+            return ErrorResponse.build(f"Permission '{permission_id}' not found", 404)
         
         item = response["Item"]
         clean_item = simplify({k: v for k, v in item.items() if k not in ["PK", "SK", "entityType"]})
@@ -1097,19 +1129,19 @@ def handle_list_permissions(authenticated_user: dict):
         return ErrorResponse.build(f"Failed to list permissions: {str(e)}", 500)
 
 
-def handle_update_permission(permission_name: str, event: dict, authenticated_user: dict):
+def handle_update_permission(permission_id: str, event: dict, authenticated_user: dict):
     """Update an existing permission"""
     if not check_permission(authenticated_user, "permission:manage"):
         return ErrorResponse.build("Insufficient permissions", 403)
     
     try:
-        pk = f"PERMISSION#{permission_name}"
+        pk = f"PERMISSION#{permission_id}"
         sk = "META"
         
         # Check if permission exists
         response = table.get_item(Key={"PK": pk, "SK": sk})
         if "Item" not in response:
-            return ErrorResponse.build(f"Permission '{permission_name}' not found", 404)
+            return ErrorResponse.build(f"Permission '{permission_id}' not found", 404)
         
         body = json.loads(event.get("body", "{}"))
         
@@ -1167,28 +1199,30 @@ def handle_update_permission(permission_name: str, event: dict, authenticated_us
         return ErrorResponse.build(f"Failed to update permission: {str(e)}", 500)
 
 
-def handle_delete_permission(permission_name: str, authenticated_user: dict):
+def handle_delete_permission(permission_id: str, authenticated_user: dict):
     """Delete a permission"""
     if not check_permission(authenticated_user, "permission:manage"):
         return ErrorResponse.build("Insufficient permissions", 403)
     
     try:
-        pk = f"PERMISSION#{permission_name}"
+        pk = f"PERMISSION#{permission_id}"
         sk = "META"
         
         # Check if permission exists
         response = table.get_item(Key={"PK": pk, "SK": sk})
         if "Item" not in response:
-            return ErrorResponse.build(f"Permission '{permission_name}' not found", 404)
+            return ErrorResponse.build(f"Permission '{permission_id}' not found", 404)
+
+        permission_name = response["Item"].get("permissionName")
         
         # Check if permission is assigned to any roles
         role_perm_check = table.scan(
-            FilterExpression="entityType = :entity_type AND contains(#pk, :perm_name)",
+            FilterExpression="entityType = :entity_type AND contains(#sk, :perm_name)",
             ExpressionAttributeValues={
                 ":entity_type": "ROLE_PERMISSION",
                 ":perm_name": permission_name
             },
-            ExpressionAttributeNames={"#pk": "PK"}
+            ExpressionAttributeNames={"#sk": "SK"}
         )
         
         if role_perm_check.get("Items"):
@@ -1210,31 +1244,33 @@ def handle_delete_permission(permission_name: str, authenticated_user: dict):
         return ErrorResponse.build(f"Failed to delete permission: {str(e)}", 500)
 
 
-def handle_assign_permission_to_role(role_name: str, event: dict, authenticated_user: dict):
+def handle_assign_permission_to_role(role_id: str, event: dict, authenticated_user: dict):
     """Assign a permission to a role"""
     if not check_permission(authenticated_user, "permission:manage"):
         return ErrorResponse.build("Insufficient permissions", 403)
     
     try:
         body = json.loads(event.get("body", "{}"))
-        permission_name = body.get("permissionName")
+        permission_id = body.get("permissionId")
         
-        if not permission_name:
-            return ErrorResponse.build("Permission name is required", 400)
+        if not permission_id:
+            return ErrorResponse.build("Permission id is required", 400)
         
         # Verify role exists
-        role_response = table.get_item(Key={"PK": f"ROLE#{role_name}", "SK": "META"})
+        role_response = table.get_item(Key={"PK": f"ROLE#{role_id}", "SK": "META"})
         if "Item" not in role_response:
-            return ErrorResponse.build(f"Role '{role_name}' not found", 404)
+            return ErrorResponse.build(f"Role '{role_id}' not found", 404)
+        role_name = role_response["Item"].get("roleName")
         
-        # Verify permission exists
-        perm_response = table.get_item(Key={"PK": f"PERMISSION#{permission_name}", "SK": "META"})
-        if "Item" not in perm_response:
-            return ErrorResponse.build(f"Permission '{permission_name}' not found", 404)
+        # Verify permission exists by id
+        permission_item = get_permission_by_id(permission_id)
+        if not permission_item:
+            return ErrorResponse.build(f"Permission '{permission_id}' not found", 404)
+        permission_name = permission_item.get("permissionName")
         
         # Create role-permission assignment
-        pk = f"ROLE#{role_name}"
-        sk = f"PERMISSION#{permission_name}"
+        pk = f"ROLE#{role_id}"
+        sk = f"PERMISSION#{permission_id}"
         
         # Check if assignment already exists
         assignment_response = table.get_item(Key={"PK": pk, "SK": sk})
@@ -1246,7 +1282,9 @@ def handle_assign_permission_to_role(role_name: str, event: dict, authenticated_
             "PK": pk,
             "SK": sk,
             "entityType": ENTITY_TYPE_ROLE_PERMISSION,
+            "roleId": role_id,
             "roleName": role_name,
+            "permissionId": permission_id,
             "permissionName": permission_name,
             "assignedAt": timestamp,
             "assignedBy": authenticated_user["uid"]
@@ -1263,19 +1301,19 @@ def handle_assign_permission_to_role(role_name: str, event: dict, authenticated_
         return ErrorResponse.build(f"Failed to assign permission: {str(e)}", 500)
 
 
-def handle_get_role_permissions(role_name: str, authenticated_user: dict):
+def handle_get_role_permissions(role_id: str, authenticated_user: dict):
     """Get all permissions for a role"""
     if not check_permission(authenticated_user, "permission:read"):
         return ErrorResponse.build("Insufficient permissions", 403)
     
     try:
         # Verify role exists
-        role_response = table.get_item(Key={"PK": f"ROLE#{role_name}", "SK": "META"})
+        role_response = table.get_item(Key={"PK": f"ROLE#{role_id}", "SK": "META"})
         if "Item" not in role_response:
-            return ErrorResponse.build(f"Role '{role_name}' not found", 404)
+            return ErrorResponse.build(f"Role '{role_id}' not found", 404)
         
         # Query role permissions
-        pk = f"ROLE#{role_name}"
+        pk = f"ROLE#{role_id}"
         response = table.query(
             KeyConditionExpression="PK = :pk AND begins_with(SK, :sk_prefix)",
             ExpressionAttributeValues={
@@ -1289,10 +1327,11 @@ def handle_get_role_permissions(role_name: str, authenticated_user: dict):
         # Get full permission details
         permissions = []
         for item in items:
-            perm_name = item.get("permissionName")
-            perm_response = table.get_item(Key={"PK": f"PERMISSION#{perm_name}", "SK": "META"})
-            if "Item" in perm_response:
-                perm_item = perm_response["Item"]
+            permission_id = item.get("permissionId")
+            if not permission_id and item.get("SK", "").startswith("PERMISSION#"):
+                permission_id = item["SK"].split("PERMISSION#", 1)[1]
+            perm_item = get_permission_by_id(permission_id)
+            if perm_item:
                 clean_perm = {k: v for k, v in perm_item.items() if k not in ["PK", "SK", "entityType"]}
                 permissions.append(clean_perm)
         
@@ -1307,14 +1346,14 @@ def handle_get_role_permissions(role_name: str, authenticated_user: dict):
         return ErrorResponse.build(f"Failed to retrieve permissions: {str(e)}", 500)
 
 
-def handle_remove_permission_from_role(role_name: str, permission_name: str, authenticated_user: dict):
+def handle_remove_permission_from_role(role_id: str, permission_id: str, authenticated_user: dict):
     """Remove a permission from a role"""
     if not check_permission(authenticated_user, "permission:manage"):
         return ErrorResponse.build("Insufficient permissions", 403)
     
     try:
-        pk = f"ROLE#{role_name}"
-        sk = f"PERMISSION#{permission_name}"
+        pk = f"ROLE#{role_id}"
+        sk = f"PERMISSION#{permission_id}"
         
         # Check if assignment exists
         response = table.get_item(Key={"PK": pk, "SK": sk})
@@ -1346,13 +1385,14 @@ def handle_assign_role_to_user(user_id: str, event: dict, authenticated_user: di
             return ErrorResponse.build(f"User '{user_id}' not found", 404)
         
         # Verify role exists
-        role_response = table.get_item(Key={"PK": f"ROLE#{assignment_data.roleName}", "SK": "META"})
+        role_response = table.get_item(Key={"PK": f"ROLE#{assignment_data.roleId}", "SK": "META"})
         if "Item" not in role_response:
-            return ErrorResponse.build(f"Role '{assignment_data.roleName}' not found", 404)
+            return ErrorResponse.build(f"Role '{assignment_data.roleId}' not found", 404)
+        role_name = role_response["Item"].get("roleName")
         
         # Create user-role assignment
         pk = f"USER#{user_id}"
-        sk = f"ROLE#{assignment_data.roleName}"
+        sk = f"ROLE#{assignment_data.roleId}"
         
         # Check if assignment already exists
         assignment_response = table.get_item(Key={"PK": pk, "SK": sk})
@@ -1365,7 +1405,8 @@ def handle_assign_role_to_user(user_id: str, event: dict, authenticated_user: di
             "SK": sk,
             "entityType": ENTITY_TYPE_USER_ROLE,
             "userId": user_id,
-            "roleName": assignment_data.roleName,
+            "roleId": assignment_data.roleId,
+            "roleName": role_name,
             "assignedAt": timestamp,
             "assignedBy": assignment_data.assignedBy or authenticated_user["uid"],
             "expiresAt": assignment_data.expiresAt
@@ -1405,8 +1446,10 @@ def handle_get_user_roles(user_id: str, authenticated_user: dict):
         # Get full role details
         roles = []
         for item in items:
-            role_name = item.get("roleName")
-            role_response = table.get_item(Key={"PK": f"ROLE#{role_name}", "SK": "META"})
+            role_id = item.get("roleId")
+            if not role_id and item.get("SK", "").startswith("ROLE#"):
+                role_id = item["SK"].split("ROLE#", 1)[1]
+            role_response = table.get_item(Key={"PK": f"ROLE#{role_id}", "SK": "META"})
             if "Item" in role_response:
                 role_item = role_response["Item"]
                 clean_role = {k: v for k, v in role_item.items() if k not in ["PK", "SK", "entityType"]}
@@ -1448,10 +1491,15 @@ def handle_get_user_permissions(user_id: str, authenticated_user: dict):
         all_permissions = {}
         
         for role_item in role_items:
-            role_name = role_item.get("roleName")
+            role_id = role_item.get("roleId")
+            if not role_id and role_item.get("SK", "").startswith("ROLE#"):
+                role_id = role_item["SK"].split("ROLE#", 1)[1]
+
+            role_response = table.get_item(Key={"PK": f"ROLE#{role_id}", "SK": "META"})
+            role_name = role_response.get("Item", {}).get("roleName")
             
             # Get permissions for this role
-            role_pk = f"ROLE#{role_name}"
+            role_pk = f"ROLE#{role_id}"
             role_perms_response = table.query(
                 KeyConditionExpression="PK = :pk AND begins_with(SK, :sk_prefix)",
                 ExpressionAttributeValues={
@@ -1466,9 +1514,8 @@ def handle_get_user_permissions(user_id: str, authenticated_user: dict):
                 perm_name = perm_item.get("permissionName")
                 
                 # Get full permission details
-                perm_response = table.get_item(Key={"PK": f"PERMISSION#{perm_name}", "SK": "META"})
-                if "Item" in perm_response:
-                    perm_data = perm_response["Item"]
+                perm_data = get_permission_by_name(perm_name)
+                if perm_data:
                     clean_perm = {k: v for k, v in perm_data.items() if k not in ["PK", "SK", "entityType"]}
                     
                     # Track which role granted this permission
@@ -1491,14 +1538,14 @@ def handle_get_user_permissions(user_id: str, authenticated_user: dict):
         return ErrorResponse.build(f"Failed to compute permissions: {str(e)}", 500)
 
 
-def handle_remove_role_from_user(user_id: str, role_name: str, authenticated_user: dict):
+def handle_remove_role_from_user(user_id: str, role_id: str, authenticated_user: dict):
     """Remove a role from a user"""
     if not check_permission(authenticated_user, "permission:assign_role"):
         return ErrorResponse.build("Insufficient permissions", 403)
     
     try:
         pk = f"USER#{user_id}"
-        sk = f"ROLE#{role_name}"
+        sk = f"ROLE#{role_id}"
         
         # Check if assignment exists
         response = table.get_item(Key={"PK": pk, "SK": sk})
@@ -1525,13 +1572,21 @@ def handle_create_component(event: dict, authenticated_user: dict):
         comp_data = ComponentCreate(**body)
         
         component_name = comp_data.componentName
-        pk = f"COMPONENT#{component_name}"
-        sk = "META"
-        
-        # Check if component already exists
-        response = table.get_item(Key={"PK": pk, "SK": sk})
-        if "Item" in response:
+
+        # Check if component already exists by name
+        response = table.scan(
+            FilterExpression="entityType = :entity_type AND componentName = :component_name",
+            ExpressionAttributeValues={
+                ":entity_type": ENTITY_TYPE_COMPONENT,
+                ":component_name": component_name
+            }
+        )
+        if response.get("Items"):
             return ErrorResponse.build(f"Component '{component_name}' already exists", 409)
+
+        component_id = str(uuid.uuid4())
+        pk = f"COMPONENT#{component_id}"
+        sk = "META"
         
         # Create component item
         timestamp = datetime.utcnow().isoformat()
@@ -1539,6 +1594,7 @@ def handle_create_component(event: dict, authenticated_user: dict):
             "PK": pk,
             "SK": sk,
             "entityType": ENTITY_TYPE_COMPONENT,
+            "componentId": component_id,
             "componentName": component_name,
             "path": comp_data.path,
             "icon": comp_data.icon,
@@ -1592,19 +1648,19 @@ def handle_list_components(authenticated_user: dict):
         return ErrorResponse.build(f"Failed to list components: {str(e)}", 500)
 
 
-def handle_get_component(component_name: str, authenticated_user: dict):
-    """Get a single UI component by name"""
+def handle_get_component(component_id: str, authenticated_user: dict):
+    """Get a single UI component by id"""
     if not check_permission(authenticated_user, "permission:read"):
         return ErrorResponse.build("Insufficient permissions", 403)
     
     try:
-        pk = f"COMPONENT#{component_name}"
+        pk = f"COMPONENT#{component_id}"
         sk = "META"
         
         response = table.get_item(Key={"PK": pk, "SK": sk})
         
         if "Item" not in response:
-            return ErrorResponse.build(f"Component '{component_name}' not found", 404)
+            return ErrorResponse.build(f"Component '{component_id}' not found", 404)
         
         item = response["Item"]
         clean_item = simplify({k: v for k, v in item.items() if k not in ["PK", "SK", "entityType"]})
@@ -1619,19 +1675,19 @@ def handle_get_component(component_name: str, authenticated_user: dict):
         return ErrorResponse.build(f"Failed to get component: {str(e)}", 500)
 
 
-def handle_update_component(component_name: str, event: dict, authenticated_user: dict):
+def handle_update_component(component_id: str, event: dict, authenticated_user: dict):
     """Update an existing UI component"""
     if not check_permission(authenticated_user, "permission:manage"):
         return ErrorResponse.build("Insufficient permissions", 403)
     
     try:
-        pk = f"COMPONENT#{component_name}"
+        pk = f"COMPONENT#{component_id}"
         sk = "META"
         
         # Check if component exists
         response = table.get_item(Key={"PK": pk, "SK": sk})
         if "Item" not in response:
-            return ErrorResponse.build(f"Component '{component_name}' not found", 404)
+            return ErrorResponse.build(f"Component '{component_id}' not found", 404)
         
         body = json.loads(event.get("body", "{}"))
         
@@ -1692,25 +1748,25 @@ def handle_update_component(component_name: str, event: dict, authenticated_user
         return ErrorResponse.build(f"Failed to update component: {str(e)}", 500)
 
 
-def handle_delete_component(component_name: str, authenticated_user: dict):
+def handle_delete_component(component_id: str, authenticated_user: dict):
     """Delete a UI component"""
     if not check_permission(authenticated_user, "permission:manage"):
         return ErrorResponse.build("Insufficient permissions", 403)
     
     try:
-        pk = f"COMPONENT#{component_name}"
+        pk = f"COMPONENT#{component_id}"
         sk = "META"
         
         # Check if component exists
         response = table.get_item(Key={"PK": pk, "SK": sk})
         if "Item" not in response:
-            return ErrorResponse.build(f"Component '{component_name}' not found", 404)
+            return ErrorResponse.build(f"Component '{component_id}' not found", 404)
         
         # Delete the component
         table.delete_item(Key={"PK": pk, "SK": sk})
         
         return SuccessResponse.build({
-            "message": f"Component '{component_name}' deleted successfully"
+            "message": f"Component '{component_id}' deleted successfully"
         }, 200)
         
     except Exception as e:
@@ -1764,74 +1820,109 @@ def lambda_handler(event, context):
         should_decrypt = query_parameters.get("decrypt", "true").lower() == "true"
         
         # ====== RBAC ROUTES (must be checked before general /users routes) ======
+
+        if path.startswith("/permissions/roles/") and "roleId" not in path_parameters:
+            return ErrorResponse.build("Missing required path parameter: roleId", 400)
+
+        elif path.startswith("/permissions/users/") and "userId" not in path_parameters:
+            return ErrorResponse.build("Missing required path parameter: userId", 400)
+
+        elif path.startswith("/permissions/components/") and "componentId" not in path_parameters:
+            return ErrorResponse.build("Missing required path parameter: componentId", 400)
+
+        elif (
+            path.startswith("/permissions/")
+            and path != "/permissions"
+            and not path.startswith("/permissions/roles")
+            and not path.startswith("/permissions/users")
+            and not path.startswith("/permissions/components")
+            and "permissionId" not in path_parameters
+        ):
+            return ErrorResponse.build("Missing required path parameter: permissionId", 400)
+
+        elif (
+            method == "DELETE"
+            and path.startswith("/permissions/roles/")
+            and "/permissions/" in path
+            and "permissionId" not in path_parameters
+        ):
+            return ErrorResponse.build("Missing required path parameter: permissionId", 400)
+
+        elif (
+            method == "DELETE"
+            and path.startswith("/permissions/users/")
+            and "/roles/" in path
+            and "roleId" not in path_parameters
+        ):
+            return ErrorResponse.build("Missing required path parameter: roleId", 400)
         
         # Role-Permission assignments (must be checked before role endpoints)
-        if method == "POST" and "/permissions/roles" in path and path.endswith("/permissions") and "roleName" in path_parameters:
-            # POST /permissions/roles/{roleName}/permissions
-            return handle_assign_permission_to_role(path_parameters["roleName"], event, authenticated_user)
+        if method == "POST" and "/permissions/roles" in path and path.endswith("/permissions") and "roleId" in path_parameters:
+            # POST /permissions/roles/{roleId}/permissions
+            return handle_assign_permission_to_role(path_parameters["roleId"], event, authenticated_user)
         
-        elif method == "GET" and "/permissions/roles" in path and "/permissions" in path and "roleName" in path_parameters and "permissionName" not in path_parameters:
-            # GET /permissions/roles/{roleName}/permissions
-            return handle_get_role_permissions(path_parameters["roleName"], authenticated_user)
+        elif method == "GET" and "/permissions/roles" in path and "/permissions" in path and "roleId" in path_parameters and "permissionId" not in path_parameters:
+            # GET /permissions/roles/{roleId}/permissions
+            return handle_get_role_permissions(path_parameters["roleId"], authenticated_user)
         
-        elif method == "DELETE" and "/permissions/roles" in path and "/permissions" in path and "permissionName" in path_parameters:
-            # DELETE /permissions/roles/{roleName}/permissions/{permissionName}
-            return handle_remove_permission_from_role(path_parameters["roleName"], path_parameters["permissionName"], authenticated_user)
+        elif method == "DELETE" and "/permissions/roles" in path and "/permissions" in path and "permissionId" in path_parameters:
+            # DELETE /permissions/roles/{roleId}/permissions/{permissionId}
+            return handle_remove_permission_from_role(path_parameters["roleId"], path_parameters["permissionId"], authenticated_user)
         
         # Role endpoints
-        elif method == "POST" and "/permissions/roles" in path and "roleName" not in path_parameters:
+        elif method == "POST" and path == "/permissions/roles":
             # POST /permissions/roles
             return handle_create_role(event, authenticated_user)
         
-        elif method == "GET" and "/permissions/roles" in path and "roleName" in path_parameters:
-            # GET /permissions/roles/{roleName}
-            return handle_get_role(path_parameters["roleName"], authenticated_user)
+        elif method == "GET" and "/permissions/roles" in path and ("roleId" in path_parameters or "roleId" in query_parameters):
+            # GET /permissions/roles/{roleId}
+            role_id = path_parameters.get("roleId") or query_parameters.get("roleId")
+            return handle_get_role(role_id, authenticated_user)
         
-        elif method == "GET" and "/permissions/roles" in path:
+        elif method == "GET" and path == "/permissions/roles":
             # GET /permissions/roles
             return handle_list_roles(authenticated_user)
         
-        elif method == "PUT" and "/permissions/roles" in path and "roleName" in path_parameters:
-            # PUT /permissions/roles/{roleName}
-            return handle_update_role(path_parameters["roleName"], event, authenticated_user)
+        elif method == "PUT" and "/permissions/roles" in path and ("roleId" in path_parameters or "roleId" in query_parameters):
+            # PUT /permissions/roles/{roleId}
+            role_id = path_parameters.get("roleId") or query_parameters.get("roleId")
+            return handle_update_role(role_id, event, authenticated_user)
         
-        elif method == "DELETE" and "/permissions/roles" in path and "roleName" in path_parameters:
-            # DELETE /permissions/roles/{roleName}
-            return handle_delete_role(path_parameters["roleName"], authenticated_user)
+        elif method == "DELETE" and "/permissions/roles" in path and ("roleId" in path_parameters or "roleId" in query_parameters):
+            # DELETE /permissions/roles/{roleId}
+            role_id = path_parameters.get("roleId") or query_parameters.get("roleId")
+            return handle_delete_role(role_id, authenticated_user)
         
         # Permission endpoints
-        elif method == "POST" and (path == "/permissions" or ("/permissions" in path and "permissionName" not in path_parameters and "/roles" not in path and "/users" not in path and "/components" not in path)):
+        elif method == "POST" and path == "/permissions":
             # POST /permissions
             return handle_create_permission(event, authenticated_user)
         
-        elif method == "GET" and "/permissions" in path and path != "/permissions" and "/roles" not in path and "/users" not in path and "/components" not in path:
-            # GET /permissions/{permissionName} - extract from path
-            permission_name = path.split("/permissions/")[1].split("/")[0] if "/permissions/" in path else None
-            if permission_name:
-                return handle_get_permission(permission_name, authenticated_user)
+        elif method == "GET" and ("permissionId" in path_parameters or "permissionId" in query_parameters):
+            # GET /permissions/{permissionId}
+            permission_id = path_parameters.get("permissionId") or query_parameters.get("permissionId")
+            return handle_get_permission(permission_id, authenticated_user)
         
-        elif method == "PUT" and "/permissions" in path and path != "/permissions" and "/roles" not in path and "/users" not in path and "/components" not in path:
-            # PUT /permissions/{permissionName} - extract from path
-            permission_name = path.split("/permissions/")[1].split("/")[0] if "/permissions/" in path else None
-            if permission_name:
-                return handle_update_permission(permission_name, event, authenticated_user)
+        elif method == "PUT" and ("permissionId" in path_parameters or "permissionId" in query_parameters):
+            # PUT /permissions/{permissionId}
+            permission_id = path_parameters.get("permissionId") or query_parameters.get("permissionId")
+            return handle_update_permission(permission_id, event, authenticated_user)
         
-        elif method == "DELETE" and "/permissions" in path and path != "/permissions" and "/roles" not in path and "/users" not in path and "/components" not in path:
-            # DELETE /permissions/{permissionName} - extract from path
-            permission_name = path.split("/permissions/")[1].split("/")[0] if "/permissions/" in path else None
-            if permission_name:
-                return handle_delete_permission(permission_name, authenticated_user)
+        elif method == "DELETE" and ("permissionId" in path_parameters or "permissionId" in query_parameters):
+            # DELETE /permissions/{permissionId}
+            permission_id = path_parameters.get("permissionId") or query_parameters.get("permissionId")
+            return handle_delete_permission(permission_id, authenticated_user)
         
-        elif method == "GET" and (path == "/permissions" or (path.endswith("/permissions") and "/users" not in path and "/roles" not in path)):
+        elif method == "GET" and path == "/permissions":
             # GET /permissions
             return handle_list_permissions(authenticated_user)
         
         # User-Role assignments
-        elif method == "POST" and "/permissions/users" in path and "/roles" in path and "userId" in path_parameters and "roleName" not in path_parameters:
+        elif method == "POST" and "/permissions/users" in path and "/roles" in path and "userId" in path_parameters and "roleId" not in path_parameters:
             # POST /permissions/users/{userId}/roles
             return handle_assign_role_to_user(path_parameters["userId"], event, authenticated_user)
         
-        elif method == "GET" and "/permissions/users" in path and path.endswith("/roles") and "userId" in path_parameters and "roleName" not in path_parameters:
+        elif method == "GET" and "/permissions/users" in path and path.endswith("/roles") and "userId" in path_parameters and "roleId" not in path_parameters:
             # GET /permissions/users/{userId}/roles
             return handle_get_user_roles(path_parameters["userId"], authenticated_user)
         
@@ -1839,46 +1930,31 @@ def lambda_handler(event, context):
             # GET /permissions/users/{userId}/permissions
             return handle_get_user_permissions(path_parameters["userId"], authenticated_user)
         
-        elif method == "DELETE" and "/permissions/users" in path and "/roles" in path and "userId" in path_parameters and "roleName" in path_parameters:
-            # DELETE /permissions/users/{userId}/roles/{roleName}
-            return handle_remove_role_from_user(path_parameters["userId"], path_parameters["roleName"], authenticated_user)
+        elif method == "DELETE" and "/permissions/users" in path and "/roles" in path and "userId" in path_parameters and "roleId" in path_parameters:
+            # DELETE /permissions/users/{userId}/roles/{roleId}
+            return handle_remove_role_from_user(path_parameters["userId"], path_parameters["roleId"], authenticated_user)
         
         # Component endpoints
-        elif method == "GET" and "/permissions/components" in path and path != "/permissions/components" and "componentName" not in path_parameters:
-            # GET /permissions/components/{componentName} - extract componentName from path
-            component_name = path.split("/permissions/components/")[1].split("/")[0] if "/permissions/components/" in path else None
-            if component_name:
-                return handle_get_component(component_name, authenticated_user)
-        
-        elif method == "GET" and "/permissions/components" in path and "componentName" in path_parameters:
-            # GET /permissions/components/{componentName} - from path parameters
-            return handle_get_component(path_parameters["componentName"], authenticated_user)
-        
-        elif method == "PUT" and "/permissions/components" in path and path != "/permissions/components":
-            # PUT /permissions/components/{componentName} - extract componentName from path
-            component_name = path.split("/permissions/components/")[1].split("/")[0] if "/permissions/components/" in path else None
-            if component_name:
-                return handle_update_component(component_name, event, authenticated_user)
-        
-        elif method == "PUT" and "/permissions/components" in path and "componentName" in path_parameters:
-            # PUT /permissions/components/{componentName} - from path parameters
-            return handle_update_component(path_parameters["componentName"], event, authenticated_user)
-        
-        elif method == "DELETE" and "/permissions/components" in path and path != "/permissions/components":
-            # DELETE /permissions/components/{componentName} - extract componentName from path
-            component_name = path.split("/permissions/components/")[1].split("/")[0] if "/permissions/components/" in path else None
-            if component_name:
-                return handle_delete_component(component_name, authenticated_user)
-        
-        elif method == "DELETE" and "/permissions/components" in path and "componentName" in path_parameters:
-            # DELETE /permissions/components/{componentName} - from path parameters
-            return handle_delete_component(path_parameters["componentName"], authenticated_user)
-        
-        elif method == "POST" and "/permissions/components" in path:
+        elif method == "GET" and ("componentId" in path_parameters or "componentId" in query_parameters):
+            # GET /permissions/components/{componentId}
+            component_id = path_parameters.get("componentId") or query_parameters.get("componentId")
+            return handle_get_component(component_id, authenticated_user)
+
+        elif method == "PUT" and ("componentId" in path_parameters or "componentId" in query_parameters):
+            # PUT /permissions/components/{componentId}
+            component_id = path_parameters.get("componentId") or query_parameters.get("componentId")
+            return handle_update_component(component_id, event, authenticated_user)
+
+        elif method == "DELETE" and ("componentId" in path_parameters or "componentId" in query_parameters):
+            # DELETE /permissions/components/{componentId}
+            component_id = path_parameters.get("componentId") or query_parameters.get("componentId")
+            return handle_delete_component(component_id, authenticated_user)
+
+        elif method == "POST" and path == "/permissions/components":
             # POST /permissions/components
             return handle_create_component(event, authenticated_user)
-        
-        elif method == "GET" and "/permissions/components" in path:
+
+        elif method == "GET" and path == "/permissions/components":
             # GET /permissions/components
             return handle_list_components(authenticated_user)
         
