@@ -1759,6 +1759,8 @@ def lambda_handler(event, context):
                             )
                             if "Item" in customer_response:
                                 customer_item = simplify(customer_response["Item"])
+                                # Decrypt customer fields before adding to response
+                                customer_item = prepare_item_for_response(customer_item, "CUSTOMER", decrypt=True)
                                 install_data["customerName"] = customer_item.get("name")
                                 install_data["customer"] = {
                                     "customerId": customer_item.get("customerId") or customer_id,
@@ -1895,6 +1897,8 @@ def lambda_handler(event, context):
                                     contact_data = {k: deserializer.deserialize(v) for k, v in item.items()}
                                     # Then simplify Decimals
                                     contact_data = simplify(contact_data)
+                                    # Decrypt customer/contact fields
+                                    contact_data = prepare_item_for_response(contact_data, "CUSTOMER", decrypt=True)
                                     contact_id = contact_data.get("contactId")
                                     
                                     logger.info(f"Simplified contact data type: {type(contact_data)}, contactId: {contact_id}, type: {type(contact_id)}")
@@ -2101,6 +2105,8 @@ def lambda_handler(event, context):
                                 for item in batch_response.get("Responses", {}).get(customers_table_name, []):
                                     customer_item = {k: deserializer.deserialize(v) for k, v in item.items()}
                                     customer_item = simplify(customer_item)
+                                    # Decrypt customer fields before adding to response
+                                    customer_item = prepare_item_for_response(customer_item, "CUSTOMER", decrypt=True)
                                     customer_id = customer_item.get("customerId")
                                     
                                     if customer_id and customer_id in customer_install_map:
@@ -3201,6 +3207,16 @@ def lambda_handler(event, context):
                 if soft_delete:
                     current_time = datetime.utcnow().isoformat() + "Z"
                     
+                    # Delete REGION_LOCK to allow reuse of region
+                    region_combo = install_data.get("regionCombo") or install_data.get("RegionCombo")
+                    if region_combo:
+                        try:
+                            region_lock_pk = f"REGION_LOCK#{region_combo}"
+                            table.delete_item(Key={"PK": region_lock_pk, "SK": "LOCK"})
+                            logger.info(f"Deleted region lock for {region_combo} during soft delete")
+                        except Exception as e:
+                            logger.warning(f"Failed to delete region lock for {region_combo}: {str(e)}")
+                    
                     update_expr = "SET IsDeleted = :deleted, DeletedAt = :deleted_at, DeletedBy = :deleted_by"
                     expr_values = {
                         ":deleted": True,
@@ -3228,6 +3244,21 @@ def lambda_handler(event, context):
                 # Handle cascade delete
                 if cascade_delete:
                     deleted_items = []
+                    
+                    # Delete REGION_LOCK if it exists
+                    region_combo = install_data.get("regionCombo") or install_data.get("RegionCombo")
+                    if region_combo:
+                        try:
+                            region_lock_pk = f"REGION_LOCK#{region_combo}"
+                            table.delete_item(Key={"PK": region_lock_pk, "SK": "LOCK"})
+                            deleted_items.append({
+                                "PK": region_lock_pk,
+                                "SK": "LOCK",
+                                "Type": "region_lock"
+                            })
+                            logger.info(f"Deleted region lock for {region_combo}")
+                        except Exception as e:
+                            logger.warning(f"Failed to delete region lock for {region_combo}: {str(e)}")
                     
                     # Query all records for this installation
                     response = table.query(
@@ -3321,6 +3352,16 @@ def lambda_handler(event, context):
                     })
                 
                 # Standard delete (only if no linked resources)
+                # Delete REGION_LOCK if it exists
+                region_combo = install_data.get("regionCombo") or install_data.get("RegionCombo")
+                if region_combo:
+                    try:
+                        region_lock_pk = f"REGION_LOCK#{region_combo}"
+                        table.delete_item(Key={"PK": region_lock_pk, "SK": "LOCK"})
+                        logger.info(f"Deleted region lock for {region_combo}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete region lock for {region_combo}: {str(e)}")
+                
                 table.delete_item(
                     Key={"PK": pk, "SK": sk}
                 )
