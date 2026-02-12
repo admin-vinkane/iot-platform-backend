@@ -178,6 +178,7 @@ class RoleUpdate(BaseModel):
 
 class PermissionCreate(BaseModel):
     permissionName: str = Field(..., min_length=1, max_length=100, pattern=r'^[a-z_]+:[a-z_]+$')
+    permissionCode: str = Field(..., min_length=1, max_length=100)
     displayName: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
     resource: str = Field(..., min_length=1, max_length=50)
@@ -185,6 +186,7 @@ class PermissionCreate(BaseModel):
     category: str = Field(..., min_length=1, max_length=100)
 
 class PermissionUpdate(BaseModel):
+    permissionCode: Optional[str] = Field(None, min_length=1, max_length=100)
     displayName: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = None
     category: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -1057,6 +1059,7 @@ def handle_create_permission(event: dict, authenticated_user: dict):
             "entityType": ENTITY_TYPE_PERMISSION,
             "permissionId": permission_id,
             "permissionName": perm_data.permissionName,
+            "permissionCode": perm_data.permissionCode,
             "displayName": perm_data.displayName,
             "description": perm_data.description,
             "resource": perm_data.resource,
@@ -1152,6 +1155,7 @@ def handle_update_permission(permission_id: str, event: dict, authenticated_user
         
         # Updatable fields
         updatable_fields = {
+            "permissionCode": "permissionCode",
             "displayName": "displayName",
             "description": "description",
             "category": "category"
