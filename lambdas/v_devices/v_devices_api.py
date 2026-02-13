@@ -2024,12 +2024,11 @@ def lambda_handler(event, context):
                                         logger.warning(f"Failed to fetch customer {customer_id}: {str(e)}")
                                         install_data["customer"] = {"customerId": customer_id, "error": "Customer not found"}
                             
-                            # Store device association metadata for later batch fetch
-                            if include_devices:
-                                # Support both PascalCase and camelCase
-                                install_id = install_data.get("installationId") or install_data.get("InstallationId")
-                                if install_id:
-                                    # Query device associations for this installation
+                            # Query and count device associations
+                            # Support both PascalCase and camelCase
+                            install_id = install_data.get("installationId") or install_data.get("InstallationId")
+                            if install_id:
+                                try:
                                     device_response = table.query(
                                         KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
                                         ExpressionAttributeValues={
@@ -2037,8 +2036,16 @@ def lambda_handler(event, context):
                                             ":sk": "DEVICE_ASSOC#"
                                         }
                                     )
-                                    # Store associations for batch fetch later
-                                    install_data["_deviceAssociations"] = device_response.get("Items", [])
+                                    device_items = device_response.get("Items", [])
+                                    install_data["devicesCount"] = len(device_items)
+                                    # Store associations for batch fetch later if needed
+                                    if include_devices:
+                                        install_data["_deviceAssociations"] = device_items
+                                except Exception as e:
+                                    logger.warning(f"Failed to count devices for {install_id}: {str(e)}")
+                                    install_data["devicesCount"] = 0
+                            else:
+                                install_data["devicesCount"] = 0
                             
                             # Query and count contact associations
                             # Support both PascalCase and camelCase
