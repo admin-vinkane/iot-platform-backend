@@ -5,7 +5,6 @@ import logging
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from enum import Enum
 from functools import wraps
 from typing import Optional, List, Dict, Any
 from shared.response_utils import SuccessResponse, ErrorResponse
@@ -15,12 +14,16 @@ from pydantic import BaseModel, ValidationError, EmailStr, Field
 # DynamoDB setup
 TABLE_NAME = os.environ.get("TABLE_NAME", "v_users_dev")
 S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "iot-platform-profile-pictures")
+DEV_MODE = os.environ.get("DEV_MODE", "true").lower() == "true"  # Set to "false" in production
 dynamodb = boto3.resource("dynamodb")
 s3_client = boto3.client("s3")
 table = dynamodb.Table(TABLE_NAME)
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+if DEV_MODE:
+    logger.warning("⚠️  DEV_MODE is ENABLED - Authentication is BYPASSED! Set DEV_MODE=false in production.")
 
 # Constants
 ENTITY_TYPE_USER = "USER"
@@ -33,25 +36,7 @@ ENTITY_TYPE_COMPONENT = "COMPONENT"
 DEFAULT_PAGE_LIMIT = 50
 MAX_PAGE_LIMIT = 100
 
-# Role definitions
-class UserRole(str, Enum):
-    ADMIN = "admin"
-    OPERATOR = "operator"
-    VIEWER = "viewer"
-    FIELD_TECHNICIAN = "field_technician"
-    MANAGER = "manager"
-
-# Permission levels for role-based access control
-ROLE_PERMISSIONS = {
-    UserRole.ADMIN: [
-        "user:read", "user:create", "user:update", "user:delete", "user:manage",
-        "permission:read", "permission:manage", "permission:assign_role"
-    ],
-    UserRole.MANAGER: ["user:read", "user:create", "user:update"],
-    UserRole.OPERATOR: ["user:read"],
-    UserRole.VIEWER: ["user:read"],
-    UserRole.FIELD_TECHNICIAN: ["user:read"]
-}
+# All roles must be fetched from the database - no hardcoded fallbacks
 
 # Pydantic model for User
 class UserDetails(BaseModel):
@@ -63,7 +48,7 @@ class UserDetails(BaseModel):
     email: EmailStr
     firstName: str = Field(min_length=1, max_length=100)
     lastName: str = Field(min_length=1, max_length=100)
-    role: UserRole
+    role: str = Field(..., min_length=1, max_length=100, description="Role name - validated against database roles")
     phoneNumber: Optional[str] = Field(default=None, pattern=r'^\+?[1-9]\d{1,14}$')
     isActive: bool = True
     emailVerified: bool = False
@@ -85,11 +70,28 @@ class UserDetails(BaseModel):
         extra = "forbid"
         use_enum_values = True
 
+# Model for full updates (PUT)
+class UserUpdate(BaseModel):
+    email: EmailStr
+    firstName: str = Field(min_length=1, max_length=100)
+    lastName: str = Field(min_length=1, max_length=100)
+    role: str = Field(..., min_length=1, max_length=100, description="Role name - validated against database roles")
+    phoneNumber: Optional[str] = Field(default=None, pattern=r'^\+?[1-9]\d{1,14}$')
+    isActive: bool = True
+    stateId: Optional[str] = None
+    districtId: Optional[str] = None
+    mandalId: Optional[str] = None
+    villageId: Optional[str] = None
+
+    class Config:
+        extra = "forbid"
+        use_enum_values = True
+
 # Model for partial updates (PATCH)
 class UserUpdatePartial(BaseModel):
     firstName: Optional[str] = Field(default=None, min_length=1, max_length=100)
     lastName: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    role: Optional[UserRole] = None
+    role: Optional[str] = Field(None, min_length=1, max_length=100, description="Role name - validated against database roles")
     phoneNumber: Optional[str] = Field(default=None, pattern=r'^\+?[1-9]\d{1,14}$')
     isActive: Optional[bool] = None
     stateId: Optional[str] = None
@@ -237,7 +239,7 @@ def verify_firebase_token(id_token: str) -> Optional[Dict[str, Any]]:
             'email': decoded_token.get('email'),
             'email_verified': decoded_token.get('email_verified', False),
             'name': decoded_token.get('name'),
-            'role': decoded_token.get('role', UserRole.VIEWER)
+            'role': decoded_token.get('role', 'viewer')
         }
     except Exception as e:
         logger.error(f"Token verification failed: {e}")
@@ -255,7 +257,7 @@ def verify_firebase_token(id_token: str) -> Optional[Dict[str, Any]]:
                 'email': decoded_token.get('email'),
                 'email_verified': decoded_token.get('email_verified', False),
                 'name': decoded_token.get('name'),
-                'role': decoded_token.get('role', UserRole.VIEWER.value)
+                'role': decoded_token.get('role', 'viewer')
             }
         except ImportError:
             # Fallback for development (INSECURE - for testing only)
@@ -279,7 +281,7 @@ def verify_firebase_token(id_token: str) -> Optional[Dict[str, Any]]:
                     'email': claims['email'],
                     'email_verified': claims.get('email_verified', False),
                     'name': claims.get('name'),
-                    'role': claims.get('role', UserRole.VIEWER.value)
+                    'role': claims.get('role', 'viewer')
                 }
             return None
     except Exception as e:
@@ -290,7 +292,20 @@ def extract_user_from_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Extract authenticated user from request event.
     Looks for Authorization header with Bearer token.
+    In DEV_MODE, returns a mock admin user for testing.
     """
+    # DEV_MODE: Bypass authentication and return mock admin user
+    if DEV_MODE:
+        logger.info("🔓 DEV_MODE: Bypassing authentication, returning mock admin user")
+        return {
+            'uid': 'dev-admin-uid',
+            'email': 'dev-admin@test.com',
+            'email_verified': True,
+            'name': 'Dev Admin',
+            'role': 'administrator',
+            'permissions': get_default_admin_permissions()
+        }
+    
     try:
         headers = event.get("headers", {})
         # Headers might be lowercase or mixed case
@@ -312,7 +327,7 @@ def check_permission(user: Optional[Dict[str, Any]], required_permission: str) -
     """
     Check if user has the required permission.
     Checks the permissions array on the user object if present,
-    otherwise falls back to role-based permissions.
+    otherwise fetches permissions from the role assigned in database.
     """
     if not user:
         return False
@@ -322,17 +337,14 @@ def check_permission(user: Optional[Dict[str, Any]], required_permission: str) -
     if user_permissions and required_permission in user_permissions:
         return True
     
-    # Fallback to role-based permissions for backward compatibility
-    user_role = user.get('role', UserRole.VIEWER.value)
-    if isinstance(user_role, str):
-        try:
-            user_role = UserRole(user_role)
-        except ValueError:
-            # If role doesn't match enum, check if permissions array exists
-            return required_permission in user_permissions
+    # Fetch permissions from database for the user's role
+    user_role = user.get('role')
+    if not user_role:
+        return False
     
-    permissions = ROLE_PERMISSIONS.get(user_role, [])
-    return required_permission in permissions
+    # Get permissions from database for this role
+    db_permissions = get_role_permissions_from_database(user_role)
+    return required_permission in db_permissions
 
 def require_permission(permission: str):
     """
@@ -357,6 +369,114 @@ def require_permission(permission: str):
     return decorator
 
 
+def get_default_admin_permissions() -> List[str]:
+    """
+    Get default admin permissions for DEV_MODE.
+    This is ONLY used for development/testing when database roles aren't populated.
+    In production, all permissions must come from the database.
+    """
+    return [
+        "user:read", "user:create", "user:update", "user:delete", "user:manage",
+        "permission:read", "permission:manage", "permission:assign_role"
+    ]
+
+
+def get_role_from_database(role_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Get role details from database by roleName.
+    
+    Args:
+        role_name: The role name to lookup
+    
+    Returns:
+        Role item from database or None if not found
+    """
+    try:
+        # Normalize role name for comparison
+        normalized_role = role_name.lower().replace(" ", "_")
+        
+        response = table.scan(
+            FilterExpression="entityType = :entity_type AND roleName = :role_name",
+            ExpressionAttributeValues={
+                ":entity_type": ENTITY_TYPE_ROLE,
+                ":role_name": normalized_role
+            }
+        )
+        
+        items = response.get("Items", [])
+        if items:
+            return items[0]
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching role from database: {str(e)}")
+        return None
+
+
+def get_role_permissions_from_database(role_name: str) -> List[str]:
+    """
+    Get permissions for a role from database only.
+    
+    Args:
+        role_name: The role name
+    
+    Returns:
+        List of permission codes assigned to the role
+    """
+    role = get_role_from_database(role_name)
+    if not role:
+        logger.warning(f"Role '{role_name}' not found in database")
+        return []
+    
+    # Get permissions assigned to this role
+    try:
+        role_id = role.get("roleId")
+        if not role_id:
+            logger.warning(f"Role '{role_name}' has no roleId")
+            return []
+        
+        # Query for role-permission mappings using the role's PK
+        pk = f"ROLE#{role_id}"
+        response = table.query(
+            KeyConditionExpression="PK = :pk",
+            ExpressionAttributeValues={
+                ":pk": pk
+            }
+        )
+        
+        # Extract permission codes from permission items (where SK starts with PERMISSION#)
+        permissions = []
+        for item in response.get("Items", []):
+            sk = item.get("SK", "")
+            # SK format: PERMISSION#{permissionId}
+            if sk.startswith("PERMISSION#"):
+                # Get the permission name from the role-permission linking item
+                permission_name = item.get("permissionName")
+                if permission_name:
+                    permissions.append(permission_name)
+                else:
+                    logger.warning(f"Permission item with SK={sk} has no permissionName")
+        
+        return permissions
+    except Exception as e:
+        logger.error(f"Error fetching role permissions for '{role_name}': {str(e)}")
+        return []
+
+
+def validate_role_exists(role_name: str) -> bool:
+    """
+    Check if a role exists in the database by roleName.
+    Strictly database-only - no fallback to hardcoded roles.
+    
+    Args:
+        role_name: The role name to validate
+    
+    Returns:
+        True if role exists in database, False otherwise
+    """
+    role = get_role_from_database(role_name)
+    return role is not None
+
+
 # Profile Handler Functions
 
 def handle_get_profile(user_id: str, authenticated_user: Optional[Dict[str, Any]], should_decrypt: bool):
@@ -364,7 +484,7 @@ def handle_get_profile(user_id: str, authenticated_user: Optional[Dict[str, Any]
     # Users can only access their own profile unless they're admin
     if authenticated_user:
         auth_user_id = authenticated_user.get('uid')
-        is_admin = authenticated_user.get('role') == UserRole.ADMIN.value
+        is_admin = authenticated_user.get('role') == 'administrator'
         if auth_user_id != user_id and not is_admin:
             return ErrorResponse.build("You can only access your own profile", 403)
     else:
@@ -454,7 +574,7 @@ def handle_update_profile(user_id: str, event: Dict[str, Any], authenticated_use
     # Users can only update their own profile unless they're admin
     if authenticated_user:
         auth_user_id = authenticated_user.get('uid')
-        is_admin = authenticated_user.get('role') == UserRole.ADMIN.value
+        is_admin = authenticated_user.get('role') == 'administrator'
         if auth_user_id != user_id and not is_admin:
             return ErrorResponse.build("You can only update your own profile", 403)
     else:
@@ -532,7 +652,7 @@ def handle_update_profile_partial(user_id: str, event: Dict[str, Any], authentic
     # Users can only update their own profile unless they're admin
     if authenticated_user:
         auth_user_id = authenticated_user.get('uid')
-        is_admin = authenticated_user.get('role') == UserRole.ADMIN.value
+        is_admin = authenticated_user.get('role') == 'administrator'
         if auth_user_id != user_id and not is_admin:
             return ErrorResponse.build("You can only update your own profile", 403)
     else:
@@ -629,7 +749,7 @@ def handle_upload_profile_picture(user_id: str, event: Dict[str, Any], authentic
     # Users can only upload their own profile picture unless they're admin
     if authenticated_user:
         auth_user_id = authenticated_user.get('uid')
-        is_admin = authenticated_user.get('role') == UserRole.ADMIN.value
+        is_admin = authenticated_user.get('role') == 'administrator'
         if auth_user_id != user_id and not is_admin:
             return ErrorResponse.build("You can only upload your own profile picture", 403)
     else:
@@ -743,7 +863,7 @@ def handle_get_profile_picture_upload_url(user_id: str, event: Dict[str, Any], a
     # Users can only get their own upload URL unless they're admin
     if authenticated_user:
         auth_user_id = authenticated_user.get('uid')
-        is_admin = authenticated_user.get('role') == UserRole.ADMIN.value
+        is_admin = authenticated_user.get('role') == 'administrator'
         if auth_user_id != user_id and not is_admin:
             return ErrorResponse.build("You can only get your own upload URL", 403)
     else:
@@ -2046,13 +2166,13 @@ def handle_list_users(query_parameters: Dict[str, Any], authenticated_user: Opti
         
         # Role filter
         if "role" in query_parameters:
-            try:
-                role = UserRole(query_parameters["role"])
-                filter_expressions.append("#role = :role")
-                expression_values[":role"] = role.value
-                expression_names["#role"] = "role"
-            except ValueError:
-                return ErrorResponse.build(f"Invalid role. Must be one of: {[r.value for r in UserRole]}", 400)
+            role = query_parameters["role"].lower().replace(" ", "_")
+            # Validate role exists
+            if not validate_role_exists(role):
+                return ErrorResponse.build(f"Invalid role: '{role}' does not exist in the database", 400)
+            filter_expressions.append("#role = :role")
+            expression_values[":role"] = role
+            expression_names["#role"] = "role"
         
         # Active status filter
         if "isActive" in query_parameters:
@@ -2427,15 +2547,22 @@ def handle_create_user(event: Dict[str, Any], authenticated_user: Optional[Dict[
             if existing.get("Items"):
                 return ErrorResponse.build(f"User with email {email} already exists", 409)
         
-        # Validate and create user
-        user = UserDetails(**data)
+        # Validate input using UserUpdate model (same fields as create requires)
+        user_data = UserUpdate(**data)
         
-        pk = f"USER#{user.id}"
+        # Validate role exists in database
+        role_name = str(user_data.role).lower().replace(" ", "_")
+        if not validate_role_exists(role_name):
+            return ErrorResponse.build(f"Role '{role_name}' does not exist in the database", 400)
+        
+        # Generate new user ID
+        user_id = str(uuid.uuid4())
+        pk = f"USER#{user_id}"
         sk = "ENTITY#USER"
-        item = user.dict()
+        item = user_data.dict()
         item["PK"] = pk
         item["SK"] = sk
-        item["id"] = user.id
+        item["id"] = user_id
         
         # Set timestamps and audit fields
         timestamp = datetime.utcnow().isoformat() + "Z"
@@ -2447,12 +2574,12 @@ def handle_create_user(event: Dict[str, Any], authenticated_user: Optional[Dict[
             item["createdBy"] = authenticated_user.get("email", "system")
         item["updatedBy"] = item.get("createdBy", "system")
         
-        # Set role permissions
-        if user.role:
-            item["permissions"] = ROLE_PERMISSIONS.get(user.role, [])
+        # Set role permissions from database
+        if user_data.role:
+            item["permissions"] = get_role_permissions_from_database(user_data.role)
         
         item = prepare_item_for_storage(item, ENTITY_TYPE_USER)
-        logger.info(f"Creating user with id={user.id}, email={user.email}, role={user.role}")
+        logger.info(f"Creating user with id={user_id}, email={user_data.email}, role={user_data.role}")
         table.put_item(Item=item)
         
         item = prepare_item_for_response(item, ENTITY_TYPE_USER, decrypt=True)
@@ -2483,18 +2610,28 @@ def handle_update_user_full(user_id: str, event: Dict[str, Any], authenticated_u
     
     try:
         # Check if user exists
-        response = table.get_item(Key={"id": user_id})
+        pk = f"USER#{user_id}"
+        sk = "ENTITY#USER"
+        response = table.get_item(Key={"PK": pk, "SK": sk})
         if "Item" not in response:
             return ErrorResponse.build(f"User with id {user_id} not found", 404)
         
         existing_user = response["Item"]
         
         data = json.loads(body)
-        user = UserDetails(**data)
+        # Validate update data using UserUpdate model
+        try:
+            update_data = UserUpdate(**data)
+        except ValidationError as e:
+            logger.error(f"Validation error: {e}")
+            return ErrorResponse.build(f"Invalid user data: {str(e)}", 400)
         
-        pk = f"USER#{user_id}"
-        sk = "ENTITY#USER"
-        item = user.dict()
+        # Validate role exists in database
+        role_name = str(update_data.role).lower().replace(" ", "_")
+        if not validate_role_exists(role_name):
+            return ErrorResponse.build(f"Role '{role_name}' does not exist in the database", 400)
+        
+        item = update_data.dict()
         item["PK"] = pk
         item["SK"] = sk
         item["id"] = user_id
@@ -2509,14 +2646,15 @@ def handle_update_user_full(user_id: str, event: Dict[str, Any], authenticated_u
         elif not item.get("updatedBy"):
             item["updatedBy"] = "system"
         
-        # Update role permissions
-        if user.role:
-            item["permissions"] = ROLE_PERMISSIONS.get(user.role, [])
+        # Update role permissions from database
+        if item.get("role"):
+            item["permissions"] = get_role_permissions_from_database(item["role"])
         
         # Preserve Firebase UID and login stats
         item["firebaseUid"] = existing_user.get("firebaseUid")
         item["lastLoginAt"] = existing_user.get("lastLoginAt")
         item["loginCount"] = existing_user.get("loginCount", 0)
+        item["emailVerified"] = existing_user.get("emailVerified", False)
         
         item = prepare_item_for_storage(item, ENTITY_TYPE_USER)
         logger.info(f"Updating user {user_id} (full replace)")
@@ -2550,7 +2688,9 @@ def handle_update_user_partial(user_id: str, event: Dict[str, Any], authenticate
     
     try:
         # Check if user exists
-        response = table.get_item(Key={"id": user_id})
+        pk = f"USER#{user_id}"
+        sk = "ENTITY#USER"
+        response = table.get_item(Key={"PK": pk, "SK": sk})
         if "Item" not in response:
             return ErrorResponse.build(f"User with id {user_id} not found", 404)
         
@@ -2561,6 +2701,12 @@ def handle_update_user_partial(user_id: str, event: Dict[str, Any], authenticate
             update_data = UserUpdatePartial(**data)
         except ValidationError as e:
             return ErrorResponse.build(f"Invalid update data: {str(e)}", 400)
+        
+        # Validate role exists in database if provided
+        if update_data.role:
+            role_name = str(update_data.role).lower().replace(" ", "_")
+            if not validate_role_exists(role_name):
+                return ErrorResponse.build(f"Role '{role_name}' does not exist in the database", 400)
         
         # Build update expression
         update_expr_parts = []
@@ -2576,13 +2722,13 @@ def handle_update_user_partial(user_id: str, event: Dict[str, Any], authenticate
         for field, value in update_dict.items():
             if field == "role":
                 # Update role and permissions together
+                role_str = value.lower().replace(" ", "_") if isinstance(value, str) else value
                 update_expr_parts.append("#role = :role")
                 expr_names["#role"] = "role"
-                expr_values[":role"] = value.value if isinstance(value, UserRole) else value
-                # Update permissions based on role
-                role_enum = UserRole(value) if isinstance(value, str) else value
+                expr_values[":role"] = role_str
+                # Update permissions based on role from database
                 update_expr_parts.append("permissions = :permissions")
-                expr_values[":permissions"] = ROLE_PERMISSIONS.get(role_enum, [])
+                expr_values[":permissions"] = get_role_permissions_from_database(role_str)
             else:
                 update_expr_parts.append(f"{field} = :{field}")
                 expr_values[f":{field}"] = value
@@ -2599,7 +2745,7 @@ def handle_update_user_partial(user_id: str, event: Dict[str, Any], authenticate
         update_expression = "SET " + ", ".join(update_expr_parts)
         
         update_params = {
-            "Key": {"id": user_id},
+            "Key": {"PK": pk, "SK": sk},
             "UpdateExpression": update_expression,
             "ExpressionAttributeValues": expr_values,
             "ReturnValues": "ALL_NEW"

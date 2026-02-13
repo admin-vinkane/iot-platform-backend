@@ -9,7 +9,7 @@
     "totalComponents": 21
   },
   "roleMapping": {
-    "admin": "Administrator",
+    "administrator": "Administrator",
     "manager": "Installation Manager",
     "operator": "Operator",
     "viewer": "Viewer",
@@ -541,7 +541,7 @@
     }
   },
   "roles": {
-    "admin": {
+    "administrator": {
       "displayName": "Administrator",
       "description": "Full system access with all permissions",
       "level": 100,
