@@ -15,16 +15,12 @@ from pydantic import BaseModel, ValidationError, EmailStr, Field
 # DynamoDB setup
 TABLE_NAME = os.environ.get("TABLE_NAME", "v_users_dev")
 S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "iot-platform-profile-pictures")
-DEV_MODE = os.environ.get("DEV_MODE", "true").lower() == "true"  # Set to "false" in production
 dynamodb = boto3.resource("dynamodb")
 s3_client = boto3.client("s3")
 table = dynamodb.Table(TABLE_NAME)
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-
-if DEV_MODE:
-    logger.warning("⚠️  DEV_MODE is ENABLED - Authentication is BYPASSED! Set DEV_MODE=false in production.")
 
 # Constants
 ENTITY_TYPE_USER = "USER"
@@ -294,19 +290,7 @@ def extract_user_from_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Extract authenticated user from request event.
     Looks for Authorization header with Bearer token.
-    In DEV_MODE, returns a mock admin user for testing.
     """
-    # DEV_MODE: Bypass authentication and return mock admin user
-    if DEV_MODE:
-        logger.info("🔓 DEV_MODE: Bypassing authentication, returning mock admin user")
-        return {
-            'uid': 'dev-admin-uid',
-            'email': 'dev-admin@test.com',
-            'email_verified': True,
-            'name': 'Dev Admin',
-            'role': UserRole.ADMIN.value
-        }
-    
     try:
         headers = event.get("headers", {})
         # Headers might be lowercase or mixed case
@@ -326,27 +310,29 @@ def extract_user_from_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def check_permission(user: Optional[Dict[str, Any]], required_permission: str) -> bool:
     """
-    Check if user has the required permission based on their role.
+    Check if user has the required permission.
+    Checks the permissions array on the user object if present,
+    otherwise falls back to role-based permissions.
     """
-    logger.info(f"🔍 check_permission called with user={user}, required={required_permission}")
     if not user:
-        logger.warning(f"❌ Permission check failed: user is None")
         return False
     
+    # Check permissions array directly if present
+    user_permissions = user.get('permissions', [])
+    if user_permissions and required_permission in user_permissions:
+        return True
+    
+    # Fallback to role-based permissions for backward compatibility
     user_role = user.get('role', UserRole.VIEWER.value)
-    logger.info(f"📌 User role extracted: {user_role}")
     if isinstance(user_role, str):
         try:
             user_role = UserRole(user_role)
         except ValueError:
-            logger.error(f"❌ Failed to parse role: {user_role}")
-            return False
+            # If role doesn't match enum, check if permissions array exists
+            return required_permission in user_permissions
     
     permissions = ROLE_PERMISSIONS.get(user_role, [])
-    logger.info(f"📋 Permissions for role {user_role}: {permissions}")
-    has_permission = required_permission in permissions
-    logger.info(f"✅ Permission check result: {has_permission}")
-    return has_permission
+    return required_permission in permissions
 
 def require_permission(permission: str):
     """
