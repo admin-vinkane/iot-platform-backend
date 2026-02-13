@@ -44,6 +44,14 @@ RESTRICTED_FIELDS = {
     "permissions",  # Auto-derived from role
 }
 
+# DynamoDB reserved keywords that must be escaped with ExpressionAttributeNames
+# Reference: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/ReservedWords.html
+DYNAMODB_RESERVED_KEYWORDS = {
+    "name", "status", "type", "timestamp", "data", "role", "permission", "permissions",
+    "group", "user", "order", "date", "time", "value", "key", "size", "comment",
+    "state", "action", "region", "location", "position", "range", "count"
+}
+
 # All roles must be fetched from the database - no hardcoded fallbacks
 
 # Pydantic model for User
@@ -704,17 +712,20 @@ def handle_update_profile_partial(user_id: str, event: Dict[str, Any], authentic
         
         for field, value in update_dict.items():
             if field in ["address", "preferences"]:
-                # Handle nested objects
+                # Handle nested objects (use ExpressionAttributeNames for all fields)
                 update_expr_parts.append(f"#{field} = :{field}")
                 expr_names[f"#{field}"] = field
                 expr_values[f":{field}"] = value if isinstance(value, dict) else value.dict()
             else:
-                update_expr_parts.append(f"{field} = :{field}")
+                # Always use ExpressionAttributeNames to avoid reserved keyword issues
+                update_expr_parts.append(f"#{field} = :{field}")
+                expr_names[f"#{field}"] = field
                 expr_values[f":{field}"] = value
         
-        # Always update timestamp
+        # Always update timestamp (use ExpressionAttributeNames)
         timestamp = datetime.utcnow().isoformat() + "Z"
-        update_expr_parts.append("updatedAt = :updatedAt")
+        update_expr_parts.append("#updatedAt = :updatedAt")
+        expr_names["#updatedAt"] = "updatedAt"
         expr_values[":updatedAt"] = timestamp
         
         update_expression = "SET " + ", ".join(update_expr_parts)
@@ -837,10 +848,14 @@ def handle_upload_profile_picture(user_id: str, event: Dict[str, Any], authentic
                 if create_response.get("statusCode") not in [200, 201]:
                     return create_response
             
-            # Update profile with new URL
+            # Update profile with new URL (use ExpressionAttributeNames)
             table.update_item(
                 Key={"PK": f"USER#{user_id}", "SK": "PROFILE#MAIN"},
-                UpdateExpression="SET profilePictureUrl = :url, updatedAt = :updated",
+                UpdateExpression="SET #profilePictureUrl = :url, #updatedAt = :updated",
+                ExpressionAttributeNames={
+                    "#profilePictureUrl": "profilePictureUrl",
+                    "#updatedAt": "updatedAt"
+                },
                 ExpressionAttributeValues={
                     ":url": profile_picture_url,
                     ":updated": timestamp_iso
@@ -1055,26 +1070,29 @@ def handle_update_role(role_id: str, event: dict, authenticated_user: dict):
         if existing_item.get("isSystem", False):
             return ErrorResponse.build("Cannot update system roles", 403)
         
-        # Build update expression
-        update_expr_parts = ["updatedAt = :updated_at"]
+        # Build update expression (use ExpressionAttributeNames for all fields)
+        update_expr_parts = ["#updatedAt = :updated_at"]
         expr_attr_values = {":updated_at": datetime.utcnow().isoformat()}
-        expr_attr_names = {}
+        expr_attr_names = {"#updatedAt": "updatedAt"}
         
         if update_data.displayName is not None:
-            update_expr_parts.append("displayName = :display_name")
+            update_expr_parts.append("#displayName = :display_name")
+            expr_attr_names["#displayName"] = "displayName"
             expr_attr_values[":display_name"] = update_data.displayName
         
         if update_data.description is not None:
-            update_expr_parts.append("description = :description")
+            update_expr_parts.append("#description = :description")
+            expr_attr_names["#description"] = "description"
             expr_attr_values[":description"] = update_data.description
         
         if update_data.level is not None:
             update_expr_parts.append("#level = :level")
-            expr_attr_values[":level"] = update_data.level
             expr_attr_names["#level"] = "level"
+            expr_attr_values[":level"] = update_data.level
         
         if update_data.isSystem is not None:
-            update_expr_parts.append("isSystem = :is_system")
+            update_expr_parts.append("#isSystem = :is_system")
+            expr_attr_names["#isSystem"] = "isSystem"
             expr_attr_values[":is_system"] = update_data.isSystem
         
         update_expression = "SET " + ", ".join(update_expr_parts)
@@ -2405,29 +2423,38 @@ def handle_user_sync(event: Dict[str, Any]):
         
         # Update firstName/lastName from Firebase if not set
         if first_name and not user.get("firstName"):
-            update_expr_parts.append("firstName = :firstName")
+            update_expr_parts.append("#firstName = :firstName")
+            expr_names["#firstName"] = "firstName"
             expr_values[":firstName"] = first_name
         if last_name and not user.get("lastName"):
-            update_expr_parts.append("lastName = :lastName")
+            update_expr_parts.append("#lastName = :lastName")
+            expr_names["#lastName"] = "lastName"
             expr_values[":lastName"] = last_name
         
         update_expr_parts.extend([
-            "updatedAt = :updated",
-            "emailVerified = :verified",
-            "lastLoginAt = :lastLogin",
-            "loginCount = if_not_exists(loginCount, :zero) + :one"
+            "#updatedAt = :updated",
+            "#emailVerified = :verified",
+            "#lastLoginAt = :lastLogin",
+            "#loginCount = if_not_exists(#loginCount, :zero) + :one"
         ])
+        expr_names.update({
+            "#updatedAt": "updatedAt",
+            "#emailVerified": "emailVerified",
+            "#lastLoginAt": "lastLoginAt",
+            "#loginCount": "loginCount"
+        })
         expr_values[":zero"] = 0
         
         update_expression = "SET " + ", ".join(update_expr_parts)
         
-        # Use PK/SK composite keys for the update
+        # Use PK/SK composite keys for the update with ExpressionAttributeNames
         response = table.update_item(
             Key={
                 "PK": f"USER#{user_id}",
                 "SK": "ENTITY#USER"
             },
             UpdateExpression=update_expression,
+            ExpressionAttributeNames=expr_names,
             ExpressionAttributeValues=expr_values,
             ReturnValues="ALL_NEW"
         )
@@ -2450,6 +2477,7 @@ def handle_user_sync(event: Dict[str, Any]):
             profile_update_needed = False
             profile_update_parts = []
             profile_expr_values = {":updated": timestamp}
+            profile_expr_names = {}
             
             if "Item" in profile_response:
                 # Profile exists - update if needed
@@ -2457,28 +2485,35 @@ def handle_user_sync(event: Dict[str, Any]):
                 
                 # Sync photoURL if available and different
                 if photo_url and profile.get("profilePictureUrl") != photo_url:
-                    profile_update_parts.append("profilePictureUrl = :photoUrl")
+                    profile_update_parts.append("#profilePictureUrl = :photoUrl")
+                    profile_expr_names["#profilePictureUrl"] = "profilePictureUrl"
                     profile_expr_values[":photoUrl"] = photo_url
                     profile_update_needed = True
                 
                 # Sync firstName/lastName to profile
                 if first_name and profile.get("firstName") != first_name:
-                    profile_update_parts.append("firstName = :firstName")
+                    profile_update_parts.append("#firstName = :firstName")
+                    profile_expr_names["#firstName"] = "firstName"
                     profile_expr_values[":firstName"] = first_name
                     profile_update_needed = True
                     
                 if last_name and profile.get("lastName") != last_name:
-                    profile_update_parts.append("lastName = :lastName")
+                    profile_update_parts.append("#lastName = :lastName")
+                    profile_expr_names["#lastName"] = "lastName"
                     profile_expr_values[":lastName"] = last_name
                     profile_update_needed = True
                 
                 if profile_update_needed:
-                    profile_update_parts.append("updatedAt = :updated")
-                    table.update_item(
-                        Key={"PK": f"USER#{user_id}", "SK": "PROFILE#MAIN"},
-                        UpdateExpression="SET " + ", ".join(profile_update_parts),
-                        ExpressionAttributeValues=profile_expr_values
-                    )
+                    profile_update_parts.append("#updatedAt = :updated")
+                    profile_expr_names["#updatedAt"] = "updatedAt"
+                    
+                    update_params = {
+                        "Key": {"PK": f"USER#{user_id}", "SK": "PROFILE#MAIN"},
+                        "UpdateExpression": "SET " + ", ".join(profile_update_parts),
+                        "ExpressionAttributeNames": profile_expr_names,
+                        "ExpressionAttributeValues": profile_expr_values
+                    }
+                    table.update_item(**update_params)
                     logger.info(f"Synced profile with Firebase data for user {user_id}")
             else:
                 # Profile doesn't exist - create it with Firebase data
@@ -2749,20 +2784,26 @@ def handle_update_user_partial(user_id: str, event: Dict[str, Any], authenticate
                 update_expr_parts.append("#role = :role")
                 expr_names["#role"] = "role"
                 expr_values[":role"] = role_str
-                # Update permissions based on role from database
-                update_expr_parts.append("permissions = :permissions")
+                # Update permissions based on role from database (permissions is a reserved keyword)
+                update_expr_parts.append("#permissions = :permissions")
+                expr_names["#permissions"] = "permissions"
                 expr_values[":permissions"] = get_role_permissions_from_database(role_str)
             else:
-                update_expr_parts.append(f"{field} = :{field}")
-                expr_values[f":{field}"] = value
+                # Always use ExpressionAttributeNames to handle reserved keywords
+                attr_name = field
+                update_expr_parts.append(f"#{attr_name} = :{attr_name}")
+                expr_names[f"#{attr_name}"] = field
+                expr_values[f":{attr_name}"] = value
         
-        # Always update timestamp and updatedBy
+        # Always update timestamp and updatedBy (both may be reserved keywords in some contexts)
         timestamp = datetime.utcnow().isoformat() + "Z"
-        update_expr_parts.append("updatedAt = :updatedAt")
+        update_expr_parts.append("#updatedAt = :updatedAt")
+        expr_names["#updatedAt"] = "updatedAt"
         expr_values[":updatedAt"] = timestamp
         
         if authenticated_user:
-            update_expr_parts.append("updatedBy = :updatedBy")
+            update_expr_parts.append("#updatedBy = :updatedBy")
+            expr_names["#updatedBy"] = "updatedBy"
             expr_values[":updatedBy"] = authenticated_user.get("email", "system")
         
         update_expression = "SET " + ", ".join(update_expr_parts)
