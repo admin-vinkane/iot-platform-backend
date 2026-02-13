@@ -478,11 +478,13 @@ def handle_update_group(group_id: str, event: Dict[str, Any], authenticated_user
             expr_attr_values[":label"] = update_data.label
         
         if update_data.icon is not None:
-            update_expr_parts.append("icon = :icon")
+            update_expr_parts.append("#icon = :icon")
+            expr_attr_names["#icon"] = "icon"
             expr_attr_values[":icon"] = update_data.icon
         
         if update_data.isActive is not None:
-            update_expr_parts.append("isActive = :isActive")
+            update_expr_parts.append("#isActive = :isActive")
+            expr_attr_names["#isActive"] = "isActive"
             expr_attr_values[":isActive"] = update_data.isActive
         
         if update_data.order is not None:
@@ -491,16 +493,20 @@ def handle_update_group(group_id: str, event: Dict[str, Any], authenticated_user
             expr_attr_values[":order"] = update_data.order
         
         if update_data.isCollapsible is not None:
-            update_expr_parts.append("isCollapsible = :isCollapsible")
+            update_expr_parts.append("#isCollapsible = :isCollapsible")
+            expr_attr_names["#isCollapsible"] = "isCollapsible"
             expr_attr_values[":isCollapsible"] = update_data.isCollapsible
         
         if update_data.defaultExpanded is not None:
-            update_expr_parts.append("defaultExpanded = :defaultExpanded")
+            update_expr_parts.append("#defaultExpanded = :defaultExpanded")
+            expr_attr_names["#defaultExpanded"] = "defaultExpanded"
             expr_attr_values[":defaultExpanded"] = update_data.defaultExpanded
         
         # Always update timestamp and updatedBy
-        update_expr_parts.append("updatedAt = :updatedAt")
-        update_expr_parts.append("updatedBy = :updatedBy")
+        update_expr_parts.append("#updatedAt = :updatedAt")
+        update_expr_parts.append("#updatedBy = :updatedBy")
+        expr_attr_names["#updatedAt"] = "updatedAt"
+        expr_attr_names["#updatedBy"] = "updatedBy"
         expr_attr_values[":updatedAt"] = get_iso_timestamp()
         expr_attr_values[":updatedBy"] = update_data.updatedBy or authenticated_user or "system"
         
@@ -724,7 +730,8 @@ def handle_update_item(group_id: str, item_id: str, event: Dict[str, Any], authe
             expr_attr_values[":label"] = update_data.label
         
         if update_data.icon is not None:
-            update_expr_parts.append("icon = :icon")
+            update_expr_parts.append("#icon = :icon")
+            expr_attr_names["#icon"] = "icon"
             expr_attr_values[":icon"] = update_data.icon
         
         if update_data.path is not None:
@@ -733,11 +740,13 @@ def handle_update_item(group_id: str, item_id: str, event: Dict[str, Any], authe
             expr_attr_values[":path"] = update_data.path
         
         if update_data.permission is not None:
-            update_expr_parts.append("permission = :permission")
+            update_expr_parts.append("#permission = :permission")
+            expr_attr_names["#permission"] = "permission"
             expr_attr_values[":permission"] = update_data.permission
         
         if update_data.isActive is not None:
-            update_expr_parts.append("isActive = :isActive")
+            update_expr_parts.append("#isActive = :isActive")
+            expr_attr_names["#isActive"] = "isActive"
             expr_attr_values[":isActive"] = update_data.isActive
         
         if update_data.order is not None:
@@ -746,8 +755,10 @@ def handle_update_item(group_id: str, item_id: str, event: Dict[str, Any], authe
             expr_attr_values[":order"] = update_data.order
         
         # Always update timestamp and updatedBy
-        update_expr_parts.append("updatedAt = :updatedAt")
-        update_expr_parts.append("updatedBy = :updatedBy")
+        update_expr_parts.append("#updatedAt = :updatedAt")
+        update_expr_parts.append("#updatedBy = :updatedBy")
+        expr_attr_names["#updatedAt"] = "updatedAt"
+        expr_attr_names["#updatedBy"] = "updatedBy"
         expr_attr_values[":updatedAt"] = get_iso_timestamp()
         expr_attr_values[":updatedBy"] = update_data.updatedBy or authenticated_user or "system"
         
@@ -849,8 +860,12 @@ def handle_reorder_groups(event: Dict[str, Any], authenticated_user: Optional[st
             # Update group order
             response = table.update_item(
                 Key={"PK": f"GROUP#{group_id}", "SK": f"METADATA#{group_id}"},
-                UpdateExpression="SET #order = :order, updatedAt = :updatedAt, updatedBy = :updatedBy",
-                ExpressionAttributeNames={"#order": "order"},
+                UpdateExpression="SET #order = :order, #updatedAt = :updatedAt, #updatedBy = :updatedBy",
+                ExpressionAttributeNames={
+                    "#order": "order",
+                    "#updatedAt": "updatedAt",
+                    "#updatedBy": "updatedBy"
+                },
                 ExpressionAttributeValues={
                     ":order": new_order,
                     ":updatedAt": get_iso_timestamp(),
@@ -904,8 +919,12 @@ def handle_reorder_items(group_id: str, event: Dict[str, Any], authenticated_use
             
             table.update_item(
                 Key={"PK": f"ITEM#{item_id}", "SK": f"METADATA#{item_id}"},
-                UpdateExpression="SET #order = :order, updatedAt = :updatedAt, updatedBy = :updatedBy",
-                ExpressionAttributeNames={"#order": "order"},
+                UpdateExpression="SET #order = :order, #updatedAt = :updatedAt, #updatedBy = :updatedBy",
+                ExpressionAttributeNames={
+                    "#order": "order",
+                    "#updatedAt": "updatedAt",
+                    "#updatedBy": "updatedBy"
+                },
                 ExpressionAttributeValues={
                     ":order": new_order,
                     ":updatedAt": get_iso_timestamp(),
@@ -981,7 +1000,12 @@ def handle_move_item(event: Dict[str, Any], authenticated_user: Optional[str]) -
         # Update item's parentId
         table.update_item(
             Key={"PK": f"ITEM#{move_data.itemId}", "SK": f"METADATA#{move_data.itemId}"},
-            UpdateExpression="SET parentId = :parentId, updatedAt = :updatedAt, updatedBy = :updatedBy",
+            UpdateExpression="SET #parentId = :parentId, #updatedAt = :updatedAt, #updatedBy = :updatedBy",
+            ExpressionAttributeNames={
+                "#parentId": "parentId",
+                "#updatedAt": "updatedAt",
+                "#updatedBy": "updatedBy"
+            },
             ExpressionAttributeValues={
                 ":parentId": move_data.toGroupId,
                 ":updatedAt": get_iso_timestamp(),
