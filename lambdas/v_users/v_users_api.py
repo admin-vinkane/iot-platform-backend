@@ -106,24 +106,6 @@ class UserUpdatePartial(BaseModel):
         extra = "forbid"
         use_enum_values = True
 
-# Model for PUT /users/{id} - Full update with only user-editable fields
-class UserUpdateFull(BaseModel):
-    email: EmailStr
-    firstName: str = Field(min_length=1, max_length=100)
-    lastName: str = Field(min_length=1, max_length=100)
-    role: UserRole
-    phoneNumber: Optional[str] = Field(default=None, pattern=r'^\+?[1-9]\d{1,14}$')
-    isActive: bool = True
-    emailVerified: bool = False
-    stateId: Optional[str] = None
-    districtId: Optional[str] = None
-    mandalId: Optional[str] = None
-    villageId: Optional[str] = None
-
-    class Config:
-        extra = "forbid"
-        use_enum_values = True
-
 # Pydantic model for User Profile
 class Address(BaseModel):
     street: Optional[str] = Field(default="", max_length=200)
@@ -346,18 +328,25 @@ def check_permission(user: Optional[Dict[str, Any]], required_permission: str) -
     """
     Check if user has the required permission based on their role.
     """
+    logger.info(f"🔍 check_permission called with user={user}, required={required_permission}")
     if not user:
+        logger.warning(f"❌ Permission check failed: user is None")
         return False
     
     user_role = user.get('role', UserRole.VIEWER.value)
+    logger.info(f"📌 User role extracted: {user_role}")
     if isinstance(user_role, str):
         try:
             user_role = UserRole(user_role)
         except ValueError:
+            logger.error(f"❌ Failed to parse role: {user_role}")
             return False
     
     permissions = ROLE_PERMISSIONS.get(user_role, [])
-    return required_permission in permissions
+    logger.info(f"📋 Permissions for role {user_role}: {permissions}")
+    has_permission = required_permission in permissions
+    logger.info(f"✅ Permission check result: {has_permission}")
+    return has_permission
 
 def require_permission(permission: str):
     """
@@ -426,7 +415,7 @@ def handle_create_default_profile(user_id: str, authenticated_user: Optional[Dic
     """Create a default profile for a user."""
     try:
         # Get user details first
-        user_response = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "ENTITY#USER"})
+        user_response = table.get_item(Key={"id": user_id})
         if "Item" not in user_response:
             return ErrorResponse.build(f"User {user_id} not found", 404)
         
@@ -2508,14 +2497,14 @@ def handle_update_user_full(user_id: str, event: Dict[str, Any], authenticated_u
     
     try:
         # Check if user exists
-        response = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "ENTITY#USER"})
+        response = table.get_item(Key={"id": user_id})
         if "Item" not in response:
             return ErrorResponse.build(f"User with id {user_id} not found", 404)
         
         existing_user = response["Item"]
         
         data = json.loads(body)
-        user = UserUpdateFull(**data)
+        user = UserDetails(**data)
         
         pk = f"USER#{user_id}"
         sk = "ENTITY#USER"
@@ -2523,7 +2512,6 @@ def handle_update_user_full(user_id: str, event: Dict[str, Any], authenticated_u
         item["PK"] = pk
         item["SK"] = sk
         item["id"] = user_id
-        item["entityType"] = ENTITY_TYPE_USER
         
         # Preserve creation info, update modification info
         item["createdAt"] = existing_user.get("createdAt", datetime.utcnow().isoformat() + "Z")
@@ -2576,7 +2564,7 @@ def handle_update_user_partial(user_id: str, event: Dict[str, Any], authenticate
     
     try:
         # Check if user exists
-        response = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "ENTITY#USER"})
+        response = table.get_item(Key={"id": user_id})
         if "Item" not in response:
             return ErrorResponse.build(f"User with id {user_id} not found", 404)
         
@@ -2625,7 +2613,7 @@ def handle_update_user_partial(user_id: str, event: Dict[str, Any], authenticate
         update_expression = "SET " + ", ".join(update_expr_parts)
         
         update_params = {
-            "Key": {"PK": f"USER#{user_id}", "SK": "ENTITY#USER"},
+            "Key": {"id": user_id},
             "UpdateExpression": update_expression,
             "ExpressionAttributeValues": expr_values,
             "ReturnValues": "ALL_NEW"
@@ -2661,12 +2649,12 @@ def handle_delete_user(user_id: str, authenticated_user: Optional[Dict[str, Any]
     
     try:
         # Check if user exists
-        response = table.get_item(Key={"PK": f"USER#{user_id}", "SK": "ENTITY#USER"})
+        response = table.get_item(Key={"id": user_id})
         if "Item" not in response:
             return ErrorResponse.build(f"User with id {user_id} not found", 404)
         
         logger.info(f"Deleting user {user_id}")
-        table.delete_item(Key={"PK": f"USER#{user_id}", "SK": "ENTITY#USER"})
+        table.delete_item(Key={"id": user_id})
         
         return SuccessResponse.build({
             "message": f"User {user_id} deleted successfully"
