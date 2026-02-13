@@ -36,6 +36,14 @@ ENTITY_TYPE_COMPONENT = "COMPONENT"
 DEFAULT_PAGE_LIMIT = 50
 MAX_PAGE_LIMIT = 100
 
+# Restricted fields that must never be user-modifiable (system-managed only)
+RESTRICTED_FIELDS = {
+    "id", "PK", "SK", "entityType",  # Identity fields
+    "createdAt", "createdBy", "updatedAt", "updatedBy",  # Audit fields
+    "firebaseUid", "emailVerified", "lastLoginAt", "loginCount",  # System-managed
+    "permissions",  # Auto-derived from role
+}
+
 # All roles must be fetched from the database - no hardcoded fallbacks
 
 # Pydantic model for User
@@ -98,7 +106,6 @@ class UserUpdatePartial(BaseModel):
     districtId: Optional[str] = None
     mandalId: Optional[str] = None
     villageId: Optional[str] = None
-    updatedBy: Optional[str] = None
 
     class Config:
         extra = "forbid"
@@ -2536,6 +2543,11 @@ def handle_create_user(event: Dict[str, Any], authenticated_user: Optional[Dict[
     try:
         data = json.loads(body)
         
+        # Defense in depth: Check for attempt to set restricted fields
+        restricted_attempted = set(data.keys()) & RESTRICTED_FIELDS
+        if restricted_attempted:
+            return ErrorResponse.build(f"Cannot set restricted fields: {', '.join(restricted_attempted)}", 400)
+        
         # Check if email already exists
         email = data.get("email")
         if email:
@@ -2626,6 +2638,11 @@ def handle_update_user_full(user_id: str, event: Dict[str, Any], authenticated_u
             logger.error(f"Validation error: {e}")
             return ErrorResponse.build(f"Invalid user data: {str(e)}", 400)
         
+        # Defense in depth: Check for attempt to set restricted fields
+        restricted_attempted = set(data.keys()) & RESTRICTED_FIELDS
+        if restricted_attempted:
+            return ErrorResponse.build(f"Cannot modify restricted fields: {', '.join(restricted_attempted)}", 400)
+        
         # Validate role exists in database
         role_name = str(update_data.role).lower().replace(" ", "_")
         if not validate_role_exists(role_name):
@@ -2655,6 +2672,9 @@ def handle_update_user_full(user_id: str, event: Dict[str, Any], authenticated_u
         item["lastLoginAt"] = existing_user.get("lastLoginAt")
         item["loginCount"] = existing_user.get("loginCount", 0)
         item["emailVerified"] = existing_user.get("emailVerified", False)
+        
+        # Preserve entityType (restricted field - must not be modified by user)
+        item["entityType"] = existing_user.get("entityType", ENTITY_TYPE_USER)
         
         item = prepare_item_for_storage(item, ENTITY_TYPE_USER)
         logger.info(f"Updating user {user_id} (full replace)")
@@ -2715,6 +2735,9 @@ def handle_update_user_partial(user_id: str, event: Dict[str, Any], authenticate
         
         # Only include fields that were actually provided
         update_dict = update_data.dict(exclude_unset=True)
+        
+        # Filter out any restricted fields (defense in depth)
+        update_dict = {k: v for k, v in update_dict.items() if k not in RESTRICTED_FIELDS}
         
         if not update_dict:
             return ErrorResponse.build("No fields to update", 400)

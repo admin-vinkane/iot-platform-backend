@@ -400,9 +400,9 @@ def main():
     total_fail += comp_fail
     
     # 5. Assign roles to specific users (example assignments)
-    # Assign admin role to admin@vinkane.com
+    # Assign administrator role to admin@vinkane.com
     user_assignments = [
-        {"userId": "admin@vinkane.com", "roleName": "admin"},
+        {"userId": "admin@vinkane.com", "roleName": "administrator"},
         {"userId": "nagendrantn@gmail.com", "roleName": "device_manager"}
     ]
     
